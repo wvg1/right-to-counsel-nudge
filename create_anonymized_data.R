@@ -7,13 +7,12 @@ library(tidyverse)
 #read in data (file name is rct_data_final_sensitive)
 rct_data_sensitive <- read_excel(file.choose())
 
-#create flag for Tacoma addresses
+#create two control variables (flag for Tacoma addresses, and number of days between initial appearance and hearing)
 rct_data_sensitive <- rct_data_sensitive %>%
-  mutate(flag_tacoma = city == "Tacoma")
-
-#create dataset for analysis
-data_for_analysis <- rct_data_sensitive %>%
-  filter(!is.na(end_date))
+  mutate(flag_tacoma = as.integer(city == "Tacoma"),
+         appearance_gap == as.integer(difftime(hearing_date, appearance_date, units = "days")) %>%
+           appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap)
+         )
 
 #function to create surnames from full names
 surname_from_full <- function(x) {
@@ -61,5 +60,8 @@ rct_data_sensitive <- rct_data_sensitive %>%
                 surname_from_name,
                 .names = "{.col}_surname"))
 
+#create anonymized dataframe for analysis
+data_for_analysis <- rct_data_sensitive %>%
+  filter(!is.na(end_date))
 
 
