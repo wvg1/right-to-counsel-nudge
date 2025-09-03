@@ -4,15 +4,29 @@
 library(readxl)
 library(tidyverse)
 
-#read in data (file name is rct_data_final_sensitive)
-rct_data_sensitive <- read_excel(file.choose())
+#read in data, convert appearance_date to date format
+rct_data_sensitive <- read_excel(file.choose()) 
+
+rct_data_sensitive <- rct_data_sensitive %>%
+  mutate(appearance_date = as.numeric(appearance_date),
+         appearance_date = as.Date(appearance_date, origin = "1899-12-30")
+         ) %>% filter(!is.na(end_date))
 
 #create two control variables (flag for Tacoma addresses, and number of days between initial appearance and hearing)
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(flag_tacoma = as.integer(city == "Tacoma"),
-         appearance_gap == as.integer(difftime(hearing_date, appearance_date, units = "days")) %>%
+         appearance_gap = as.integer(difftime(hearing_date, appearance_date, units = "days")),
            appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap)
          )
+
+#create outcome variables (binary measure of monetary judgment, and final outcomes)
+rct_data_sensitive <- rct_data_sensitive %>%
+  mutate(
+    monetary_judgment_binary = if_else(monetary_judgment != 0, 1, 0),
+    writ_final = if_else(writ == 1 & writ_stayed_vacated == 0, 1, 0),
+    dismissal_final = if_else(dismissal == 1 & dismissal_vacated == 0, 1, 0),
+    old_final = if_else(old == 1 & old_vacated == 0, 1, 0)
+  )
 
 #function to create surnames from full names
 surname_from_full <- function(x) {

@@ -6,6 +6,36 @@ library(sandwich)
 library(lmtest)
 library(stargazer) #if desired
 
+data_for_analysis <- rct_data_sensitive %>%
+  select(
+    case_no,
+    household_ID,
+    flag_tacoma,
+    mail_date,
+    hearing_date,
+    appearance,
+    appearance_date,
+    appearance_gap,
+    treat,
+    hearing_held,
+    hearing_att,
+    rep_offered,
+    writ_final,
+    dismissal_final,
+    old_final,
+    forced_move,
+    monetary_judgment,
+    monetary_judgment_binary
+  )
+
+data_for_analysis <- data_for_analysis %>%
+  group_by(case_no) %>%
+  slice_max(order_by = hearing_date, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+#check for duplicate case numbers and addresses
+sum(duplicated(data_for_analysis$case_no))
+
 #model 1
 model_1 <- glm(
   hearing_held ~ treat + flag_tacoma + appearance_gap + appearance,
@@ -14,11 +44,11 @@ model_1 <- glm(
 )
 
 V_robust <- vcovHC(model_1, type = "HC1")
-coeftest(m_logit, vcov. = V_robust)
+ct <- coeftest(model_1, vcov. = V_robust)
 
 #odds ratios with cluster-robust CIs
-est <- coef(m_logit)
-se  <- sqrt(diag(V_cl))
+est <- coef(model_1)
+se  <- sqrt(diag(V_robust))
 ci  <- cbind(est - 1.96*se, est + 1.96*se)
 
 #print summary table
