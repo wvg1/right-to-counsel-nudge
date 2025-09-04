@@ -5,6 +5,7 @@
 library(tidyverse)
 library(sandwich)
 library(lmtest)
+library(marginaleffects)
 library(stargazer) #if desired
 
 #create dataframe of completed cases
@@ -99,6 +100,58 @@ all_results <- bind_rows(
   arrange(spec, outcome)
 
 all_results
+
+#refit and save logistic regressions
+mods <- setNames(lapply(binary_outcomes, function(y) {
+  glm(as.formula(paste0(y, " ~ treat + flag_tacoma + response_cat")),
+      data = data_itt, family = binomial())
+}), binary_outcomes)
+
+# Use clustered SEs directly inside marginaleffects
+ame_tab <- imap_dfr(mods, function(m, y) {
+  ame <- avg_slopes(m, variables = "treat", vcov = ~ household_ID)
+  tibble(outcome = y,
+         AME_pp = 100 * ame$estimate,
+         AME_lo = 100 * ame$conf.low,
+         AME_hi = 100 * ame$conf.high)
+})
+
+# map from raw outcome var -> pretty label used in all_results$outcome
+outcome_map <- tibble::tibble(
+  outcome_raw = c(
+    "hearing_att",
+    "dismissal_final",
+    "forced_move",
+    "hearing_held",
+    "monetary_judgment_binary",
+    "old_final",
+    "rep_offered",
+    "writ_final"
+  ),
+  outcome_label = c(
+    "Attendance",
+    "Dismissal (final)",
+    "Forced move",
+    "Hearing held",
+    "Monetary judgment (binary)",
+    "Order of limited dissemination (final)",
+    "Representation offered",
+    "Writ (final)"
+  )
+)
+
+# Recode AME table to the same labels, then join
+ame_tab_labeled <- ame_tab %>%
+  rename(outcome_raw = outcome) %>%
+  left_join(outcome_map, by = "outcome_raw") %>%
+  transmute(outcome = outcome_label, AME_pp, AME_lo, AME_hi)
+
+report_full <- all_results %>%
+  left_join(ame_tab_labeled, by = "outcome")
+
+report_full %>%
+  select(-spec) %>%
+  print(n = Inf)
 
 #now for continuous outcomes
 fit_one_cont <- function(outcome, data, transform = c("level","log1p")) {
