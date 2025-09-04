@@ -153,56 +153,26 @@ report_full %>%
   select(-spec) %>%
   print(n = Inf)
 
-#now for continuous outcomes
-fit_one_cont <- function(outcome, data, transform = c("level","log1p")) {
-  transform <- match.arg(transform)
-  lhs <- if (transform == "log1p") paste0("log1p(", outcome, ")") else outcome
-  fml <- as.formula(paste0(lhs, " ~ treat + flag_tacoma + response_cat"))
-  
-  m <- lm(fml, data = data)
-  
-  # cluster-robust SEs by household
-  mf  <- model.frame(m)
-  idx <- as.integer(rownames(mf))
-  cl  <- data$household_ID[idx]
-  
-  V  <- vcovCL(m, cluster = cl, type = "HC1")
-  ct <- coeftest(m, vcov. = V)
-  
-  est <- ct["treat","Estimate"]
-  se  <- ct["treat","Std. Error"]
-  t   <- est / se
-  ci_lo <- est - 1.96*se
-  ci_hi <- est + 1.96*se
-  
-  tibble(
-    outcome,
-    scale      = transform,
-    n          = nobs(m),
-    estimate   = est,       
-    robust_se  = se,
-    t_value    = t,
-    p_value    = 2*pnorm(-abs(t)),
-    ci_lo      = ci_lo,
-    ci_hi      = ci_hi,
-    # Back-of-envelope back-transform for log1p: multiplicative effect on (1 + outcome)
-    mult_effect_on_1plus = if (transform == "log1p") exp(est) else NA_real_
+#plot for hearing outcomes
+all_results %>%
+  filter(outcome %in% c("Hearing held", "Attendance", "Representation offered")) %>%
+  ggplot(aes(x = OR, y = outcome)) +
+  geom_point(size = 2, color = "steelblue") +
+  geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
+                 height = 0.2, linewidth = 0.8, color = "steelblue") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
+  scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
+  scale_y_discrete(labels = function(x) ifelse(grepl("\\s", x), sub("\\s", "\n", x), x)) +
+  labs(
+    x = "Odds Ratio (log scale)",
+    y = NULL,
+    title = "Treatment Effects on Hearing Outcomes"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 9),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0), # left-aligned, larger
+    plot.margin = margin(10, 10, 10, 10) # add room around entire plot
   )
-}
 
-continuous_outcomes <- c("monetary_judgment")
-
-# Primary: levels
-results_levels <- map_dfr(continuous_outcomes, ~fit_one_cont(.x, data_for_analysis, "level"))
-
-# Optional sensitivity: log(1+y) to handle skew / outliers
-results_log1p  <- map_dfr(continuous_outcomes, ~fit_one_cont(.x, data_for_analysis, "log1p"))
-
-bind_rows(results_levels, results_log1p) %>%
-  mutate(
-    pretty_outcome = recode(outcome,
-                            case_length = "Case length (days)",
-                            monetary_judgment = "Monetary judgment ($)"
-    )
-  ) %>%
-  arrange(pretty_outcome, scale)
