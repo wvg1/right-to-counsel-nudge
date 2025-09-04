@@ -1,4 +1,5 @@
 ### this script analyzes the final anonymized dataset from an experiment testing the effectiveness of a mailer for increasing access to WA's right to counsel program
+#before running, ensure rct_data_sensitive has been created from create_full_data.R
 
 #load packages
 library(tidyverse)
@@ -6,10 +7,11 @@ library(sandwich)
 library(lmtest)
 library(stargazer) #if desired
 
+#create dataframe of completed cases
 data_for_analysis <- rct_data_sensitive %>%
   select(
     case_no,
-    household_ID,
+    hearing_ID,
     flag_tacoma,
     mail_date,
     hearing_date,
@@ -26,15 +28,14 @@ data_for_analysis <- rct_data_sensitive %>%
     forced_move,
     monetary_judgment,
     monetary_judgment_binary
-  )
+  ) %>%
+  filter(!is.na(end_date))
 
+#if needed to remove repeat observations
 data_for_analysis <- data_for_analysis %>%
   group_by(case_no) %>%
   slice_max(order_by = hearing_date, n = 1, with_ties = FALSE) %>%
   ungroup()
-
-#check for duplicate case numbers and addresses
-sum(duplicated(data_for_analysis$case_no))
 
 #model 1
 model_1 <- glm(

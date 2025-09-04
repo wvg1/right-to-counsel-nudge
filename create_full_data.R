@@ -10,7 +10,7 @@ rct_data_sensitive <- read_excel(file.choose())
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(appearance_date = as.numeric(appearance_date),
          appearance_date = as.Date(appearance_date, origin = "1899-12-30")
-         ) %>% filter(!is.na(end_date))
+         )
 
 #create two control variables (flag for Tacoma addresses, and number of days between initial appearance and hearing)
 rct_data_sensitive <- rct_data_sensitive %>%
@@ -27,6 +27,62 @@ rct_data_sensitive <- rct_data_sensitive %>%
     dismissal_final = if_else(dismissal == 1 & dismissal_vacated == 0, 1, 0),
     old_final = if_else(old == 1 & old_vacated == 0, 1, 0)
   )
+
+#review duplicate case numbers and addresses
+rct_data_sensitive %>%
+  filter(duplicated(case_no) | duplicated(case_no, fromLast = TRUE) |
+           duplicated(address) | duplicated(address, fromLast = TRUE)) %>%
+  arrange(address, case_no) %>%
+  select(case_no, address, hearing_ID) %>%
+  print(n = Inf)
+
+#duplicate cases are in the following pairs of hearing_IDs
+#(214) 523
+#(451) 710
+#(94) 174
+#(6) 298
+#(390) 616
+#(1) 229
+#(336) 596
+#(10) 97
+#(96) 135)
+#(598) 676
+#(588) 668
+#(98) 648)
+#(381) 456
+
+#use those pairs to remove observations from previously treated cases
+pairs <- tribble(
+  ~low, ~high,
+  214, 523,
+  451, 710,
+  94, 174,
+  6, 298,
+  390, 616,
+  1, 229,
+  336, 596,
+  10,  97,
+  96, 135,
+  598, 676,
+  588, 668,
+  98, 648,
+  381, 456
+)
+
+rct_data_sensitive <- rct_data_sensitive %>%
+  anti_join(
+    pairs %>%
+      inner_join(rct_data_sensitive, by = c("low" = "hearing_ID")) %>%
+      filter(treat == 1) %>%
+      transmute(hearing_ID = high),
+    by = "hearing_ID"
+  )
+
+#alternative approach: just remove all repeat tenant households
+rct_data_sensitive <- rct_data_sensitive %>%
+  filter(!hearing_ID %in% pairs$high)
+
+#ethnic enclaves
 
 #function to create surnames from full names
 surname_from_full <- function(x) {
@@ -73,9 +129,4 @@ rct_data_sensitive <- rct_data_sensitive %>%
   mutate(across(c(name1, name2, name3, name4),
                 surname_from_name,
                 .names = "{.col}_surname"))
-
-#create anonymized dataframe for analysis
-data_for_analysis <- rct_data_sensitive %>%
-  filter(!is.na(end_date))
-
 
