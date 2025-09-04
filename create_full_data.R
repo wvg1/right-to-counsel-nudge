@@ -4,22 +4,66 @@
 library(readxl)
 library(tidyverse)
 
-#read in data, convert appearance_date to date format
-rct_data_sensitive <- read_excel(file.choose()) 
+#read in data
+rct_data_sensitive <- read_excel(file.choose())
 
+#convert appearance_date to date format
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(appearance_date = as.numeric(appearance_date),
          appearance_date = as.Date(appearance_date, origin = "1899-12-30")
-         )
+  )
 
-#create two control variables (flag for Tacoma addresses, and number of days between initial appearance and hearing)
+#convert hearing_ID and household_ID to factors
+rct_data_sensitive <- rct_data_sensitive %>%
+  mutate(household_ID = as.factor(household_ID),
+         hearing_ID = as.factor(hearing_ID)
+           )
+
+#create numeric variables for a) number of days between hearing_date and end_date and b) number of days between appearance_date and hearing_date
+rct_data_sensitive <- rct_data_sensitive %>%
+  mutate(case_length = as.integer(difftime(end_date, hearing_date, units = "days")),
+         appearance_gap = as.integer(difftime(hearing_date, appearance_date, units = "days")),
+         appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap)
+  )
+
+#create two control variables (flag for Tacoma addresses, and ordinal appearance variable)
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(flag_tacoma = as.integer(city == "Tacoma"),
-         appearance_gap = as.integer(difftime(hearing_date, appearance_date, units = "days")),
-           appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap)
-         )
+         response_cat = case_when(
+      !is.na(appearance) & appearance == 1 &
+        !is.na(appearance_date) & appearance_date < as.Date(hearing_date) &
+        !is.na(appearance_provider) & appearance_provider == 1 ~ "provider",
+      !is.na(appearance) & appearance == 1 &
+        !is.na(appearance_date) & appearance_date < as.Date(hearing_date) ~ "other",
+      TRUE ~ "none"
+    ) |> factor(levels = c("none","other","provider"))
+  )
 
-#create outcome variables (binary measure of monetary judgment, and final outcomes)
+
+#normalize all existing binary measures to numeric variables
+rct_data_sensitive <- rct_data_sensitive %>%
+  mutate(
+    across(
+      c(
+        flag_tacoma,
+        appearance,
+        appearance_provider,
+        hearing_held,
+        hearing_att,
+        rep_offered,
+        writ,
+        writ_stayed_vacated,
+        dismissal,
+        dismissal_vacated,
+        old,
+        old_vacated,
+        forced_move,
+        treat
+      ),
+      ~ as.numeric(.x))
+  )
+
+#create binary outcome variables (binary measure of monetary judgment, and final outcomes)
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(
     monetary_judgment_binary = if_else(monetary_judgment != 0, 1, 0),
@@ -27,6 +71,18 @@ rct_data_sensitive <- rct_data_sensitive %>%
     dismissal_final = if_else(dismissal == 1 & dismissal_vacated == 0, 1, 0),
     old_final = if_else(old == 1 & old_vacated == 0, 1, 0)
   )
+
+#review duplicate case numbers by name
+name_check <- rct_data_sensitive %>%
+  select(case_no, name1:name4) %>%
+  pivot_longer(cols = starts_with("name"), names_to = "name_field", values_to = "tenant_name") %>%
+  filter(!is.na(tenant_name) & tenant_name != "") %>%
+  distinct(case_no, tenant_name) %>%
+  count(tenant_name, name = "n_case_numbers") %>%
+  filter(n_case_numbers > 1) %>%
+  arrange(desc(n_case_numbers))
+
+name_check
 
 #review duplicate case numbers and addresses
 rct_data_sensitive %>%
@@ -51,7 +107,7 @@ rct_data_sensitive %>%
 #(98) 648)
 #(381) 456
 
-#use those pairs to remove observations from previously treated cases
+#saving code to use those pairs remove all repeat tenant households
 pairs <- tribble(
   ~low, ~high,
   214, 523,
@@ -69,16 +125,6 @@ pairs <- tribble(
   381, 456
 )
 
-rct_data_sensitive <- rct_data_sensitive %>%
-  anti_join(
-    pairs %>%
-      inner_join(rct_data_sensitive, by = c("low" = "hearing_ID")) %>%
-      filter(treat == 1) %>%
-      transmute(hearing_ID = high),
-    by = "hearing_ID"
-  )
-
-#alternative approach: just remove all repeat tenant households
 rct_data_sensitive <- rct_data_sensitive %>%
   filter(!hearing_ID %in% pairs$high)
 
