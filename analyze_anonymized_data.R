@@ -18,8 +18,9 @@ data_for_analysis <- rct_data_sensitive %>%
     mail_date,
     hearing_date,
     appearance,
+    appearance_before_hearing,
     appearance_date,
-    response_cat,
+    appearance_provider,
     treat,
     hearing_held,
     hearing_att,
@@ -35,6 +36,11 @@ data_for_analysis <- rct_data_sensitive %>%
   ) %>%
   filter(!is.na(end_date))
 
+#quick balancing test
+with(data_for_analysis, chisq.test(table(treat,flag_tacoma)))
+with(data_for_analysis, chisq.test(table(treat,appearance_before_hearing)))
+with(data_for_analysis, chisq.test(table(treat,appearance_provider)))
+
 #label binary outcomes
 binary_outcomes <- c("hearing_held",
                      "hearing_att",
@@ -48,7 +54,7 @@ binary_outcomes <- c("hearing_held",
 
 #function to fit logistic regression and return effect sizes with CIs
 fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ treat + flag_tacoma + response_cat"))
+  fml <- as.formula(paste0(outcome, " ~ treat + flag_tacoma + appearance_before_hearing"))
   m   <- glm(fml, data = data, family = binomial())
   
   # Align the cluster vector to the rows actually used in the model
@@ -103,7 +109,7 @@ all_results
 
 #refit and save logistic regressions
 mods <- setNames(lapply(binary_outcomes, function(y) {
-  glm(as.formula(paste0(y, " ~ treat + flag_tacoma + response_cat")),
+  glm(as.formula(paste0(y, " ~ treat + flag_tacoma + appearance_before_hearing")),
       data = data_itt, family = binomial())
 }), binary_outcomes)
 

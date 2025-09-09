@@ -23,22 +23,13 @@ rct_data_sensitive <- rct_data_sensitive %>%
 rct_data_sensitive <- rct_data_sensitive %>%
   mutate(case_length = as.integer(difftime(end_date, hearing_date, units = "days")),
          appearance_gap = as.integer(difftime(hearing_date, appearance_date, units = "days")),
-         appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap)
+         appearance_gap = ifelse(is.na(appearance_gap), 0L, appearance_gap),
+         appearance_before_hearing = ifelse(appearance_gap >= 1, 1L, 0L)
   )
 
-#create two control variables (flag for Tacoma addresses, and ordinal appearance variable)
+#create flag variable for Tacoma addresses
 rct_data_sensitive <- rct_data_sensitive %>%
-  mutate(flag_tacoma = as.integer(city == "Tacoma"),
-         response_cat = case_when(
-      !is.na(appearance) & appearance == 1 &
-        !is.na(appearance_date) & appearance_date < as.Date(hearing_date) &
-        !is.na(appearance_provider) & appearance_provider == 1 ~ "provider",
-      !is.na(appearance) & appearance == 1 &
-        !is.na(appearance_date) & appearance_date < as.Date(hearing_date) ~ "other",
-      TRUE ~ "none"
-    ) |> factor(levels = c("none","other","provider"))
-  )
-
+  mutate(flag_tacoma = as.integer(city == "Tacoma"))
 
 #normalize all existing binary measures to numeric variables
 rct_data_sensitive <- rct_data_sensitive %>%
@@ -71,6 +62,11 @@ rct_data_sensitive <- rct_data_sensitive %>%
     dismissal_final = if_else(dismissal == 1 & dismissal_vacated == 0, 1, 0),
     old_final = if_else(old == 1 & old_vacated == 0, 1, 0)
   )
+
+#drop any repeat household_IDs
+rct_data_sensitive <- rct_data_sensitive %>%
+  distinct(household_ID, .keep_all = TRUE)
+
 
 #review duplicate case numbers by name
 name_check <- rct_data_sensitive %>%
