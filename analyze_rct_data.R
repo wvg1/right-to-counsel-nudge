@@ -110,9 +110,69 @@ results_itt <- map_dfr(hearing_outcomes, fit_one, data = data_itt) %>%
 
 results_itt
 
+# 1) Fit models on the same data used for ITT
+mods <- setNames(lapply(hearing_outcomes, function(y) {
+  glm(
+    reformulate(
+      c("household_treated_before_hearing", "flag_tacoma", "appearance_before_hearing"),
+      response = y
+    ),
+    data = data_itt, family = binomial()
+  )
+}), hearing_outcomes)
 
+# 2) Average marginal effects of the correct treatment term, with clustered SEs
+ame_tab <- imap_dfr(mods, function(m, y) {
+  ame <- avg_slopes(m,
+                    variables = "household_treated_before_hearing",
+                    vcov = ~ household_ID)
+  tibble(
+    outcome = y,                          # raw code matches results_itt$outcome
+    AME_pp  = 100 * ame$estimate,         # percentage points
+    AME_lo  = 100 * ame$conf.low,
+    AME_hi  = 100 * ame$conf.high
+  )
+})
 
+# 3) Join directly by raw outcome codes
+report_full <- results_itt %>%
+  left_join(ame_tab, by = "outcome")
 
+report_full %>%
+  select(-spec) %>%
+  print(n = Inf)
+
+#plot ITT effects on hearing outcomes
+# map internal outcome codes -> pretty labels
+label_map <- c(
+  hearing_held = "Hearing held",
+  hearing_att  = "Attendance",
+  rep_offered  = "Representation offered"
+)
+
+results_itt %>%
+  filter(outcome %in% names(label_map)) %>%
+  mutate(outcome_label = recode(outcome, !!!label_map),
+         outcome_label = factor(outcome_label,
+                                levels = c("Hearing held", "Attendance", "Representation offered"))) %>%
+  ggplot(aes(x = OR, y = outcome_label)) +
+  geom_point(size = 2, color = "steelblue") +
+  geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
+                 height = 0.1, linewidth = 0.8, color = "steelblue") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
+  scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
+  scale_y_discrete(labels = function(x) sub("\\s", "\n", x)) +
+  labs(
+    x = "Odds Ratio (log scale)",
+    y = NULL,
+    title = "Treatment Effects on Hearing Outcomes"
+  ) + theme_minimal(base_size = 10, base_family = "serif") +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0),
+    plot.margin = margin(10, 10, 10, 10)
+  )
 
 
 
@@ -267,7 +327,7 @@ report_full %>%
   print(n = Inf)
 
 #plot for hearing outcomes
-all_results %>%
+results_itt %>%
   filter(outcome %in% c("Hearing held", "Attendance", "Representation offered")) %>%
   ggplot(aes(x = OR, y = outcome)) +
   geom_point(size = 2, color = "steelblue") +
