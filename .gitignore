@@ -1,0 +1,6 @@
+﻿# Ignore Excel spreadsheets
+*.xlsx
+*.xlsm
+*.xlsb
+*.xls
+~$*.xls*
