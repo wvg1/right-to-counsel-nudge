@@ -62,21 +62,45 @@ multi_case_households
 
 ###begin analysis ###
 #quick balancing test for all hearings
-with(data_for_analysis, chisq.test(table(ever_treated,flag_tacoma)))
-with(data_for_analysis, chisq.test(table(ever_treated,appearance_before_hearing)))
-with(data_for_analysis, chisq.test(table(ever_treated,appearance_provider)))
+with(data_for_analysis, chisq.test(table(household_treated_before_hearing,flag_tacoma)))
+with(data_for_analysis, chisq.test(table(household_treated_before_hearing,appearance_before_hearing)))
+with(data_for_analysis, chisq.test(table(household_treated_before_hearing,appearance_provider)))
 
-#print crosstabs for hearing prior to treatment vs. tacoma, answer before hearing, and answer with provider logo
+#print crosstabs and proportions for hearing prior to treatment vs. tacoma
 df_flag <- transform(
   data_for_analysis,
-  ever_treated = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
+  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
   flag_tacoma  = factor(flag_tacoma,  levels = c(0,1), labels = c("No","Yes"))
 )
-tab_flag_counts <- with(df_flag, table(ever_treated, flag_tacoma))
+tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, flag_tacoma))
 tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
 
 tab_flag_counts
-tab_flag_rowpct  # row percentages
+tab_flag_rowpc 
+
+#print crosstabs and proportions for hearing prior to treatment vs. answer before hearing
+df_flag <- transform(
+  data_for_analysis,
+  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
+  appearance_before_hearing  = factor(appearance_before_hearing,  levels = c(0,1), labels = c("No","Yes"))
+)
+tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, appearance_before_hearing))
+tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+
+tab_flag_counts
+tab_flag_rowpct
+
+#print crosstabs and proportions for hearing prior to treatment vs. answer with provider logo
+df_flag <- transform(
+  data_for_analysis,
+  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
+  appearance_provider  = factor(appearance_provider,  levels = c(0,1), labels = c("No","Yes"))
+)
+tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, appearance_provider))
+tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+
+tab_flag_counts
+tab_flag_rowpct
 
 #function to fit logistic regression using household-level treatment variable and return effect sizes with CIs
 fit_one <- function(outcome, data) {
@@ -84,12 +108,12 @@ fit_one <- function(outcome, data) {
   m   <- glm(fml, data = data, family = binomial())
   
   # Align the cluster vector to the rows actually used in the model
-  mf <- model.frame(m)                              # rows kept by glm after NA handling
-  idx <- as.integer(rownames(mf))                   # row indices in `data`
-  cl  <- data$household_ID[idx]                     # cluster vector aligned to m’s rows
+  mf <- model.frame(m)                              
+  idx <- as.integer(rownames(mf))                   
+  cl  <- data$case_no[idx]                     
   
-  V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by household
-  ct  <- lmtest::coeftest(m, vcov. = V)
+  V   <- vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by case
+  ct  <- coeftest(m, vcov. = V)
   
   est <- ct["household_treated_before_hearing", "Estimate"]
   se  <- ct["household_treated_before_hearing", "Std. Error"]
@@ -109,8 +133,7 @@ fit_one <- function(outcome, data) {
 
 #label hearing outcomes
 hearing_outcomes <- c("hearing_held",
-                     "hearing_att",
-                     "rep_offered"
+                     "hearing_att"
 )
 
 #analyze ITT effects on hearing outcomes
@@ -137,10 +160,10 @@ mods <- setNames(lapply(hearing_outcomes, function(y) {
 ame_tab <- imap_dfr(mods, function(m, y) {
   ame <- avg_slopes(m,
                     variables = "household_treated_before_hearing",
-                    vcov = ~ household_ID)
+                    vcov = ~ case_no)
   tibble(
-    outcome = y,                          # raw code matches results_itt$outcome
-    AME_pp  = 100 * ame$estimate,         # percentage points
+    outcome = y,                          
+    AME_pp  = 100 * ame$estimate,        
     AME_lo  = 100 * ame$conf.low,
     AME_hi  = 100 * ame$conf.high
   )
@@ -158,15 +181,14 @@ report_full %>%
 #map codes to labels
 label_map <- c(
   hearing_held = "Hearing held",
-  hearing_att  = "Attendance",
-  rep_offered  = "Representation offered"
+  hearing_att  = "Attendance"
 )
 
 results_itt %>%
   filter(outcome %in% names(label_map)) %>%
   mutate(outcome_label = recode(outcome, !!!label_map),
          outcome_label = factor(outcome_label,
-                                levels = c("Hearing held", "Attendance", "Representation offered"))) %>%
+                                levels = c("Hearing held", "Attendance"))) %>%
   ggplot(aes(x = OR, y = outcome_label)) +
   geom_point(size = 2, color = "steelblue") +
   geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
@@ -194,8 +216,44 @@ results_itt %>%
     plot.margin  = margin(t = 4, r = 6, b = 4, l = 4)              
   )
 
-#analyze ITT effects on other binary case outcomes
+#analyze CATE effects on hearing outcomes
+hearing_outcomes_cate <- c("hearing_att", "rep_offered")
+data_cate <- data_for_analysis %>% filter(hearing_held == 1)
+
+results_cate <- map_dfr(hearing_outcomes_cate, fit_one, data = data_cate) %>%
+  mutate(spec = "CATE (subset: hearing held)")
+
+mods_cate <- setNames(lapply(hearing_outcomes_cate, function(y) {
+  glm(reformulate(c("household_treated_before_hearing",
+                    "flag_tacoma", "appearance_before_hearing"),
+                  response = y),
+      data = data_cate, family = binomial())
+}), hearing_outcomes_cate)
+
+ame_cate <- imap_dfr(mods_cate, function(m, y) {
+  ame <- avg_slopes(
+    m,
+    variables = "household_treated_before_hearing",
+    vcov = ~ case_no
+  )
+  tibble(
+    outcome = y,
+    AME_pp  = 100 * ame$estimate,
+    AME_lo  = 100 * ame$conf.low,
+    AME_hi  = 100 * ame$conf.high
+  )
+})
+
+report_cate <- results_cate %>%
+  left_join(ame_cate, by = "outcome")
+
+report_cate %>%
+  select(-spec) %>%
+  print(n = Inf)
+
+#analyze ITT effects on binary case outcomes
 binary_case_outcomes <- c(
+                     "rep_offered",
                      "writ_final",
                      "dismissal_final",
                      "old_final",
@@ -211,7 +269,7 @@ fit_one <- function(outcome, data) {
   # Align the cluster vector to the rows actually used in the model
   mf <- model.frame(m)                              # rows kept by glm after NA handling
   idx <- as.integer(rownames(mf))                   # row indices in `data`
-  cl  <- data$household_ID[idx]                     # cluster vector aligned to m’s rows
+  cl  <- data$case_no[idx]                     # cluster vector aligned to m’s rows
   
   V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by household
   ct  <- lmtest::coeftest(m, vcov. = V)
@@ -248,7 +306,8 @@ case_outcome_results <- bind_rows(
                      dismissal_final = "Dismissal",
                      old_final    = "Order of limited dissemination issued",
                      forced_move  = "Forced move",
-                     monetary_judgment_binary = "Monetary judgment issued"
+                     monetary_judgment_binary = "Monetary judgment issued",
+                     rep_offered = "Representation offered"
     )
   ) %>%
   arrange(spec, outcome)
@@ -263,7 +322,7 @@ mods <- setNames(lapply(binary_case_outcomes, function(y) {
 
 # Use clustered SEs directly inside marginaleffects
 ame_tab <- imap_dfr(mods, function(m, y) {
-  ame <- avg_slopes(m, variables = "ever_treated", vcov = ~ household_ID)
+  ame <- avg_slopes(m, variables = "ever_treated", vcov = ~ case_no)
   tibble(outcome = y,
          AME_pp = 100 * ame$estimate,
          AME_lo = 100 * ame$conf.low,
@@ -277,14 +336,16 @@ outcome_map <- tibble(
     "writ_final",
     "old_final",
     "monetary_judgment_binary",
-    "forced_move"
+    "forced_move",
+    "rep_offered"
   ),
   outcome_label = c(
     "Dismissal",
     "Writ issued",
     "Order of limited dissemination issued",
     "Monetary judgment issued",
-    "Forced move"
+    "Forced move",
+    "Representation offered"
   )
 )
 
@@ -308,7 +369,8 @@ label_map_case_outcomes <- c(
   dismissal_final = "Dismissal",
   old_final    = "Order of limited dissemination issued",
   forced_move  = "Forced move",
-  monetary_judgment_binary = "Monetary judgment issued"
+  monetary_judgment_binary = "Monetary judgment issued",
+  rep_offered = "Representation offered"
 )
 
 results_itt_case_outcomes %>%
@@ -317,7 +379,7 @@ results_itt_case_outcomes %>%
          outcome_label = factor(outcome_label,
                                 levels = c("Writ issued", "Dismissal",
                                            "Order of limited dissemination issued",
-                                           "Forced move", "Monetary judgment issued"))) %>%
+                                           "Forced move", "Monetary judgment issued", "Representation offered"))) %>%
   ggplot(aes(x = OR, y = outcome_label)) +
   geom_point(size = 2, color = "steelblue") +
   geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
