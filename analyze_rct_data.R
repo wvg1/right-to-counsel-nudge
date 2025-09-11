@@ -110,7 +110,7 @@ results_itt <- map_dfr(hearing_outcomes, fit_one, data = data_itt) %>%
 
 results_itt
 
-# 1) Fit models on the same data used for ITT
+#fit models on the same data used for ITT
 mods <- setNames(lapply(hearing_outcomes, function(y) {
   glm(
     reformulate(
@@ -121,7 +121,7 @@ mods <- setNames(lapply(hearing_outcomes, function(y) {
   )
 }), hearing_outcomes)
 
-# 2) Average marginal effects of the correct treatment term, with clustered SEs
+#average marginal effects of the correct treatment term, with clustered SEs
 ame_tab <- imap_dfr(mods, function(m, y) {
   ame <- avg_slopes(m,
                     variables = "household_treated_before_hearing",
@@ -134,7 +134,7 @@ ame_tab <- imap_dfr(mods, function(m, y) {
   )
 })
 
-# 3) Join directly by raw outcome codes
+#join directly by raw outcome codes
 report_full <- results_itt %>%
   left_join(ame_tab, by = "outcome")
 
@@ -143,7 +143,7 @@ report_full %>%
   print(n = Inf)
 
 #plot ITT effects on hearing outcomes
-# map internal outcome codes -> pretty labels
+#map codes to labels
 label_map <- c(
   hearing_held = "Hearing held",
   hearing_att  = "Attendance",
@@ -174,18 +174,8 @@ results_itt %>%
     plot.margin = margin(10, 10, 10, 10)
   )
 
-
-
-
-
-
-
-
-
-#label binary outcomes
-binary_outcomes <- c("hearing_held",
-                     "hearing_att",
-                     "rep_offered",
+#analyze ITT effects on other binary case outcomes
+binary_case_outcomes <- c(
                      "writ_final",
                      "dismissal_final",
                      "old_final",
@@ -193,35 +183,9 @@ binary_outcomes <- c("hearing_held",
                      "monetary_judgment_binary"
 )
 
-#drop any repeat household_IDs
-rct_data_sensitive <- rct_data_sensitive %>%
-  distinct(household_ID, .keep_all = TRUE)
-
-
-#saving code to use those pairs remove all repeat tenant households
-pairs <- tribble(
-  ~low, ~high,
-  214, 523,
-  451, 710,
-  94, 174,
-  6, 298,
-  390, 616,
-  1, 229,
-  336, 596,
-  10,  97,
-  96, 135,
-  598, 676,
-  588, 668,
-  98, 648,
-  381, 456
-)
-
-rct_data_sensitive <- rct_data_sensitive %>%
-  filter(!hearing_ID %in% pairs$high)
-
-#function to fit logistic regression and return effect sizes with CIs
+#function to fit logistic regressions and return effect sizes with CIs
 fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ treat + flag_tacoma + appearance_before_hearing"))
+  fml <- as.formula(paste0(outcome, " ~ ever_treated + flag_tacoma + appearance_before_hearing"))
   m   <- glm(fml, data = data, family = binomial())
   
   # Align the cluster vector to the rows actually used in the model
@@ -232,8 +196,8 @@ fit_one <- function(outcome, data) {
   V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by household
   ct  <- lmtest::coeftest(m, vcov. = V)
   
-  est <- ct["treat", "Estimate"]
-  se  <- ct["treat", "Std. Error"]
+  est <- ct["ever_treated", "Estimate"]
+  se  <- ct["ever_treated", "Std. Error"]
   tibble(
     outcome   = outcome,
     n         = nobs(m),
@@ -248,41 +212,38 @@ fit_one <- function(outcome, data) {
   )
 }
 
-#analyze hearing attendance using ITT approach
-data_itt <- data_for_analysis %>%
+#analyze binary case outcomes using ITT approach
+data_itt_case_outcomes <- data_for_analysis %>%
   mutate(hearing_att = if_else(is.na(hearing_att) & hearing_held == 0, 0, hearing_att))
 
-results_itt <- map_dfr(binary_outcomes, fit_one, data = data_itt) %>%
+results_itt_case_outcomes <- map_dfr(binary_case_outcomes, fit_one, data = data_itt_case_outcomes) %>%
   mutate(spec = "ITT (NA attendance -> 0 when no hearing)")
 
 #print all effects on binary outcomes
-all_results <- bind_rows(
-  results_itt) %>%
+case_outcome_results <- bind_rows(
+  results_itt_case_outcomes) %>%
   mutate(
     outcome = recode(outcome,
-                     hearing_held = "Hearing held",
-                     hearing_att  = "Attendance",
-                     rep_offered  = "Representation offered",
-                     writ_final   = "Writ (final)",
-                     dismissal_final = "Dismissal (final)",
-                     old_final    = "Order of limited dissemination (final)",
+                     writ_final   = "Writ issed",
+                     dismissal_final = "Dismissal",
+                     old_final    = "Order of limited dissemination issued",
                      forced_move  = "Forced move",
-                     monetary_judgment_binary = "Monetary judgment (binary)"
+                     monetary_judgment_binary = "Monetary judgment issued"
     )
   ) %>%
   arrange(spec, outcome)
 
-all_results
+case_outcome_results
 
 #refit and save logistic regressions
-mods <- setNames(lapply(binary_outcomes, function(y) {
-  glm(as.formula(paste0(y, " ~ treat + flag_tacoma + appearance_before_hearing")),
-      data = data_itt, family = binomial())
-}), binary_outcomes)
+mods <- setNames(lapply(binary_case_outcomes, function(y) {
+  glm(as.formula(paste0(y, " ~ ever_treated + flag_tacoma + appearance_before_hearing")),
+      data = data_itt_case_outcomes, family = binomial())
+}), binary_case_outcomes)
 
 # Use clustered SEs directly inside marginaleffects
 ame_tab <- imap_dfr(mods, function(m, y) {
-  ame <- avg_slopes(m, variables = "treat", vcov = ~ household_ID)
+  ame <- avg_slopes(m, variables = "ever_treated", vcov = ~ household_ID)
   tibble(outcome = y,
          AME_pp = 100 * ame$estimate,
          AME_lo = 100 * ame$conf.low,
@@ -290,26 +251,20 @@ ame_tab <- imap_dfr(mods, function(m, y) {
 })
 
 # map from raw outcome var -> pretty label used in all_results$outcome
-outcome_map <- tibble::tibble(
+outcome_map <- tibble(
   outcome_raw = c(
-    "hearing_att",
     "dismissal_final",
-    "forced_move",
-    "hearing_held",
-    "monetary_judgment_binary",
+    "writ_final",
     "old_final",
-    "rep_offered",
-    "writ_final"
+    "monetary_judgment_binary",
+    "forced_move"
   ),
   outcome_label = c(
-    "Attendance",
-    "Dismissal (final)",
-    "Forced move",
-    "Hearing held",
-    "Monetary judgment (binary)",
-    "Order of limited dissemination (final)",
-    "Representation offered",
-    "Writ (final)"
+    "Dismissal",
+    "Writ issued",
+    "Order of limited dissemination issued",
+    "Monetary judgment issued",
+    "Forced move"
   )
 )
 
@@ -319,10 +274,10 @@ ame_tab_labeled <- ame_tab %>%
   left_join(outcome_map, by = "outcome_raw") %>%
   transmute(outcome = outcome_label, AME_pp, AME_lo, AME_hi)
 
-report_full <- all_results %>%
+report_full_case_outcomes <- case_outcome_results %>%
   left_join(ame_tab_labeled, by = "outcome")
 
-report_full %>%
+report_full_case_outcomes %>%
   select(-spec) %>%
   print(n = Inf)
 
