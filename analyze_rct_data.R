@@ -62,9 +62,21 @@ multi_case_households
 
 ###begin analysis ###
 #quick balancing test for all hearings
-with(data_for_analysis, chisq.test(table(treat,flag_tacoma)))
-with(data_for_analysis, chisq.test(table(treat,appearance_before_hearing)))
-with(data_for_analysis, chisq.test(table(treat,appearance_provider)))
+with(data_for_analysis, chisq.test(table(ever_treated,flag_tacoma)))
+with(data_for_analysis, chisq.test(table(ever_treated,appearance_before_hearing)))
+with(data_for_analysis, chisq.test(table(ever_treated,appearance_provider)))
+
+#print crosstabs for hearing prior to treatment vs. tacoma, answer before hearing, and answer with provider logo
+df_flag <- transform(
+  data_for_analysis,
+  ever_treated = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
+  flag_tacoma  = factor(flag_tacoma,  levels = c(0,1), labels = c("No","Yes"))
+)
+tab_flag_counts <- with(df_flag, table(ever_treated, flag_tacoma))
+tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+
+tab_flag_counts
+tab_flag_rowpct  # row percentages
 
 #function to fit logistic regression using household-level treatment variable and return effect sizes with CIs
 fit_one <- function(outcome, data) {
@@ -158,20 +170,28 @@ results_itt %>%
   ggplot(aes(x = OR, y = outcome_label)) +
   geom_point(size = 2, color = "steelblue") +
   geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
-                 height = 0.1, linewidth = 0.8, color = "steelblue") +
+                 height = 0.15, linewidth = 0.8, color = "steelblue") +
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
-  scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
+  scale_x_log10(
+    breaks = c(0.5, 1, 2, 3),
+    limits = c(0.4, 3.5),
+    expand = expansion(mult = c(0.02, 0.06))   # add padding inside panel
+  ) +
   scale_y_discrete(labels = function(x) sub("\\s", "\n", x)) +
   labs(
     x = "Odds Ratio (log scale)",
     y = NULL,
     title = "Treatment Effects on Hearing Outcomes"
-  ) + theme_minimal(base_size = 10, base_family = "serif") +
+  ) +
+  theme_minimal(base_size = 10, base_family = "serif") +
   theme(
     panel.grid.minor = element_blank(),
-    axis.text.y = element_text(size = 10),
-    plot.title = element_text(size = 12, face = "bold", hjust = 0),
-    plot.margin = margin(10, 10, 10, 10)
+    axis.text.y  = element_text(size = 10, margin = margin(r = 8)),
+    axis.text.x  = element_text(margin = margin(t = 6)),               
+    axis.title.x = element_text(margin = margin(t = 10)),              
+    plot.title   = element_text(size = 12, face = "bold", hjust = 0,
+                                margin = margin(b = 12)),               
+    plot.margin  = margin(t = 4, r = 6, b = 4, l = 4)              
   )
 
 #analyze ITT effects on other binary case outcomes
@@ -224,7 +244,7 @@ case_outcome_results <- bind_rows(
   results_itt_case_outcomes) %>%
   mutate(
     outcome = recode(outcome,
-                     writ_final   = "Writ issed",
+                     writ_final   = "Writ issued",
                      dismissal_final = "Dismissal",
                      old_final    = "Order of limited dissemination issued",
                      forced_move  = "Forced move",
@@ -281,26 +301,42 @@ report_full_case_outcomes %>%
   select(-spec) %>%
   print(n = Inf)
 
-#plot for hearing outcomes
-results_itt %>%
-  filter(outcome %in% c("Hearing held", "Attendance", "Representation offered")) %>%
-  ggplot(aes(x = OR, y = outcome)) +
+#plot ITT effects on case outcomes
+#map codes to labels
+label_map_case_outcomes <- c(
+  writ_final   = "Writ issued",
+  dismissal_final = "Dismissal",
+  old_final    = "Order of limited dissemination issued",
+  forced_move  = "Forced move",
+  monetary_judgment_binary = "Monetary judgment issued"
+)
+
+results_itt_case_outcomes %>%
+  filter(outcome %in% names(label_map_case_outcomes)) %>%
+  mutate(outcome_label = recode(outcome, !!!label_map_case_outcomes),
+         outcome_label = factor(outcome_label,
+                                levels = c("Writ issued", "Dismissal",
+                                           "Order of limited dissemination issued",
+                                           "Forced move", "Monetary judgment issued"))) %>%
+  ggplot(aes(x = OR, y = outcome_label)) +
   geom_point(size = 2, color = "steelblue") +
   geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
-                 height = 0.2, linewidth = 0.8, color = "steelblue") +
+                 height = 0.1, linewidth = 0.8, color = "steelblue") +
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
   scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
-  scale_y_discrete(labels = function(x) ifelse(grepl("\\s", x), sub("\\s", "\n", x), x)) +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 22)) +
   labs(
     x = "Odds Ratio (log scale)",
     y = NULL,
-    title = "Treatment Effects on Hearing Outcomes"
+    title = "Treatment Effects on Case Outcomes"
   ) +
-  theme_minimal(base_size = 9) +
+  theme_minimal(base_size = 10, base_family = "serif") +
   theme(
     panel.grid.minor = element_blank(),
-    axis.text.y = element_text(size = 9),
-    plot.title = element_text(size = 12, face = "bold", hjust = 0), # left-aligned, larger
-    plot.margin = margin(10, 10, 10, 10) # add room around entire plot
+    axis.text.y = element_text(size = 10, margin = margin(r = 8)),
+    axis.text.x  = element_text(margin = margin(t = 6)),               
+    axis.title.x = element_text(margin = margin(t = 10)),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0, margin = margin(b = 12)),
+    plot.margin = margin(10, 10, 10, 10)
   )
 
