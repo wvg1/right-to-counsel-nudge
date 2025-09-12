@@ -41,7 +41,10 @@ rct_data_sensitive <- rct_data_sensitive %>%
         appearance_provider,
         hearing_held,
         hearing_att,
-        rep_offered,
+        rep_screened,
+        rep_appointed,
+        rep_waived,
+        rep_denied,
         writ,
         writ_stayed_vacated,
         dismissal,
@@ -66,7 +69,11 @@ rct_data_sensitive <- rct_data_sensitive %>%
 #create ever_treated variable for household_ID
 rct_data_sensitive <- rct_data_sensitive %>%
   group_by(household_ID) %>%
-  mutate(ever_treated = as.integer(any(treat == 1, na.rm = TRUE))) %>%
+  #rows are in case/chronological order within household
+  arrange(is.na(mail_date), mail_date, .by_group = TRUE) %>%
+  mutate(
+    household_treated_by_this_case = cummax(coalesce(as.integer(treat), 0L))
+  ) %>%
   ungroup()
 
 #create household_treated_before_hearing variable for hearing_ID

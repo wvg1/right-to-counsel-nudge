@@ -22,11 +22,14 @@ data_for_analysis <- rct_data_sensitive %>%
     appearance_date,
     appearance_provider,
     treat,
-    ever_treated,
     household_treated_before_hearing,
+    household_treated_by_this_case,
     hearing_held,
     hearing_att,
-    rep_offered,
+    rep_screened,
+    rep_appointed,
+    rep_waived,
+    rep_denied,
     writ_final,
     dismissal_final,
     old_final,
@@ -46,7 +49,7 @@ dup_households <- data_for_analysis %>%
 
 dup_households
 
-#do any tenant households have multiple cases? answer should be empty
+#do any tenant households have multiple cases?
 multi_case_households <- data_for_analysis %>%
   filter(household_ID %in% dup_households$household_ID) %>%
   group_by(household_ID) %>%
@@ -217,7 +220,7 @@ results_itt %>%
   )
 
 #analyze CATE effects on hearing outcomes
-hearing_outcomes_cate <- c("hearing_att", "rep_offered")
+hearing_outcomes_cate <- c("hearing_att", "rep_screened")
 data_cate <- data_for_analysis %>% filter(hearing_held == 1)
 
 results_cate <- map_dfr(hearing_outcomes_cate, fit_one, data = data_cate) %>%
@@ -253,7 +256,8 @@ report_cate %>%
 
 #analyze ITT effects on binary case outcomes
 binary_case_outcomes <- c(
-                     "rep_offered",
+                     "rep_screened",
+                     "rep_appointed",
                      "writ_final",
                      "dismissal_final",
                      "old_final",
@@ -263,19 +267,19 @@ binary_case_outcomes <- c(
 
 #function to fit logistic regressions and return effect sizes with CIs
 fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ ever_treated + flag_tacoma + appearance_before_hearing"))
+  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing"))
   m   <- glm(fml, data = data, family = binomial())
   
   # Align the cluster vector to the rows actually used in the model
   mf <- model.frame(m)                              # rows kept by glm after NA handling
   idx <- as.integer(rownames(mf))                   # row indices in `data`
-  cl  <- data$case_no[idx]                     # cluster vector aligned to m’s rows
+  cl  <- data$household_ID[idx]                     # cluster vector aligned to m’s rows
   
   V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by household
   ct  <- lmtest::coeftest(m, vcov. = V)
   
-  est <- ct["ever_treated", "Estimate"]
-  se  <- ct["ever_treated", "Std. Error"]
+  est <- ct["household_treated_by_this_case", "Estimate"]
+  se  <- ct["household_treated_by_this_case", "Std. Error"]
   tibble(
     outcome   = outcome,
     n         = nobs(m),
@@ -307,7 +311,8 @@ case_outcome_results <- bind_rows(
                      old_final    = "Order of limited dissemination issued",
                      forced_move  = "Forced move",
                      monetary_judgment_binary = "Monetary judgment issued",
-                     rep_offered = "Representation offered"
+                     rep_screened = "Screened for representation",
+                     rep_appointed = "Representation appointed"
     )
   ) %>%
   arrange(spec, outcome)
@@ -316,13 +321,13 @@ case_outcome_results
 
 #refit and save logistic regressions
 mods <- setNames(lapply(binary_case_outcomes, function(y) {
-  glm(as.formula(paste0(y, " ~ ever_treated + flag_tacoma + appearance_before_hearing")),
+  glm(as.formula(paste0(y, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing")),
       data = data_itt_case_outcomes, family = binomial())
 }), binary_case_outcomes)
 
 # Use clustered SEs directly inside marginaleffects
 ame_tab <- imap_dfr(mods, function(m, y) {
-  ame <- avg_slopes(m, variables = "ever_treated", vcov = ~ case_no)
+  ame <- avg_slopes(m, variables = "household_treated_by_this_case", vcov = ~ case_no)
   tibble(outcome = y,
          AME_pp = 100 * ame$estimate,
          AME_lo = 100 * ame$conf.low,
@@ -337,7 +342,8 @@ outcome_map <- tibble(
     "old_final",
     "monetary_judgment_binary",
     "forced_move",
-    "rep_offered"
+    "rep_screened",
+    "rep_appointed"
   ),
   outcome_label = c(
     "Dismissal",
@@ -345,7 +351,8 @@ outcome_map <- tibble(
     "Order of limited dissemination issued",
     "Monetary judgment issued",
     "Forced move",
-    "Representation offered"
+    "Screened for representation",
+    "Representation appointed"
   )
 )
 
@@ -370,23 +377,39 @@ label_map_case_outcomes <- c(
   old_final    = "Order of limited dissemination issued",
   forced_move  = "Forced move",
   monetary_judgment_binary = "Monetary judgment issued",
-  rep_offered = "Representation offered"
+  rep_appointed = "Representation appointed",
+  rep_screened = "Screened for representation"
 )
+
+# 1) Define your base order once
+base_lvls <- c(
+  "Writ issued", "Dismissal",
+  "Order of limited dissemination issued",
+  "Forced move", "Monetary judgment issued",
+  "Representation appointed", "Screened for representation"
+)
+
+# 2) Interleave invisible spacer levels (one between each real level)
+spaced_lvls <- c(rbind(base_lvls, paste0("___spacer_", seq_along(base_lvls))))
+spaced_lvls <- spaced_lvls[-length(spaced_lvls)]  # drop trailing spacer
 
 results_itt_case_outcomes %>%
   filter(outcome %in% names(label_map_case_outcomes)) %>%
-  mutate(outcome_label = recode(outcome, !!!label_map_case_outcomes),
-         outcome_label = factor(outcome_label,
-                                levels = c("Writ issued", "Dismissal",
-                                           "Order of limited dissemination issued",
-                                           "Forced move", "Monetary judgment issued", "Representation offered"))) %>%
+  mutate(
+    outcome_label = recode(outcome, !!!label_map_case_outcomes),
+    outcome_label = factor(outcome_label, levels = base_lvls)
+  ) %>%
   ggplot(aes(x = OR, y = outcome_label)) +
   geom_point(size = 2, color = "steelblue") +
   geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
                  height = 0.1, linewidth = 0.8, color = "steelblue") +
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
   scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
-  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 22)) +
+  scale_y_discrete(
+    limits = spaced_lvls,                             # inserts blank rows between categories
+    breaks = base_lvls,                               # only label real categories
+    labels = function(x) str_wrap(x, width = 22)
+  ) +
   labs(
     x = "Odds Ratio (log scale)",
     y = NULL,
@@ -396,9 +419,8 @@ results_itt_case_outcomes %>%
   theme(
     panel.grid.minor = element_blank(),
     axis.text.y = element_text(size = 10, margin = margin(r = 8)),
-    axis.text.x  = element_text(margin = margin(t = 6)),               
+    axis.text.x = element_text(margin = margin(t = 6)),
     axis.title.x = element_text(margin = margin(t = 10)),
     plot.title = element_text(size = 12, face = "bold", hjust = 0, margin = margin(b = 12)),
     plot.margin = margin(10, 10, 10, 10)
   )
-
