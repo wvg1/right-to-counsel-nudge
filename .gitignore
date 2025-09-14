@@ -4,3 +4,7 @@
 *.xlsb
 *.xls
 ~$*.xls*
+# Ignore CSV and Excel files
+*.csv
+*.xls
+*.xlsx
