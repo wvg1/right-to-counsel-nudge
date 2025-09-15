@@ -8,3 +8,10 @@
 *.csv
 *.xls
 *.xlsx
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata/
+.Rproj.user/
+.Renviron
+.Rprofile
