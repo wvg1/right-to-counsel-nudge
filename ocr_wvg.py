@@ -116,7 +116,6 @@ def process_all_pdfs(root_folder, output_folder):
     
     print("="*70)
 
-
 #run the script
 if __name__ == "__main__":
     #CHANGE THESE PATHS to match your setup
