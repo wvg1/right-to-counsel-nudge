@@ -1,14 +1,46 @@
 """
 This script performs OCR on a set of PDFs using Azure Document Intelligence.
-"""
+PDFs should be in zipped case folders in right-to-counsel-nudge/data
+Set Documents/right-to-counsel nudge as working directory before running
 
+"""
 import os
 import sys
+import zipfile
+import time
 from pathlib import Path
 
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+
+#extract all zip files in root directory
+def extract_zips(zip_folder, extract_to):
+    """extract zips in zip_folder to extract_to directory """
+    zip_folder = Path(zip_folder)
+    extract_to = Path(extract_to)
+
+    #create new directory if needed
+    extract_to.mkdir(parents=True, exist_ok=True)
+
+    #identify all zip files
+    zip_files = list(zip_folder.glob("*.zip"))
+    if not zip_files:
+        print(f"no zip files found")
+        return
+    
+    print(f"found {len(zip_files)} zip files")
+
+    for zip_path in zip_files:
+        print(f"extracting: {zip_path.name}")
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_to)
+            print(f"extracted successfully\n")
+        except Exception as e:
+            print(f"ERROR: {e}\n")
+
+    print(f"all files extracted to: {extract_to}\n")   
 
 #create document intelligence client
 endpoint = os.getenv("AZURE_DI_ENDPOINT")
@@ -30,18 +62,17 @@ def extract_text(path):
 
     result = poller.result()
 
-#extract text from result
+    #extract text from result
     if result.content:
         text = result.content
     else:
         text = ""  #return empty string if no text
-        print("No text found")
     
     return text
 
 #find all PDFs in case folders recursively
 def process_all_pdfs(root_folder, output_folder):
-    """process all PDFs in case folders and save extracted text."""
+    """Process all PDFs in case folders and save extracted text."""
     root_folder = Path(root_folder)
     output_folder = Path(output_folder)
     
@@ -72,6 +103,7 @@ def process_all_pdfs(root_folder, output_folder):
         try:
             #extract text using our function
             text = extract_text(pdf_path)
+            time.sleep(0.5)
             
             #create output path preserving folder structure
             relative_path = pdf_path.relative_to(root_folder)
@@ -89,16 +121,15 @@ def process_all_pdfs(root_folder, output_folder):
                 f.write("="*70 + "\n\n")
                 f.write(text)
             
-            print(f"  ✓ Saved\n")
+            print(f"saved\n")
             successful += 1
-            except Exception as e:
-            #if anything goes wrong, log it and continue
-            print(f"  ✗ ERROR: {e}\n")
+        except Exception as e:
+            #log errors and continue
+            print(f"ERROR: {e}\n")
             failed += 1
             failed_files.append((pdf_path, str(e)))
     
     #print final summary
-    print("="*70)
     print(f"Processing complete")
     print(f"  Successful: {successful}/{total_pdfs}")
     print(f"  Failed: {failed}/{total_pdfs}")
@@ -114,13 +145,18 @@ def process_all_pdfs(root_folder, output_folder):
                 f.write(f"  Error: {error}\n\n")
         print(f"  Error log saved: {error_log}")
     
-    print("="*70)
-
-#run the script
 if __name__ == "__main__":
-    #CHANGE THESE PATHS to match your setup
-    root = "path/to/your/case/folders"  # Your 700 case folders
-    output = "extracted_texts"           # Where to save output
+    #define paths
+    zip_folder = r"data\RCT Case documents"
+    extracted_folder = "case_folders_extracted"
+    output_folder = "extracted_texts"
     
-    #run the processing
-    process_all_pdfs(root, output)
+    #extract all zip files
+    print("STEP 1: Extracting zip files")
+    print("="*70)
+    extract_zips(zip_folder, extracted_folder)
+    
+    #process all PDFs
+    print("\nSTEP 2: Processing PDFs with OCR")
+    print("="*70)
+    process_all_pdfs(extracted_folder, output_folder)
