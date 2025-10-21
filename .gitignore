@@ -15,3 +15,7 @@
 .Rproj.user/
 .Renviron
 .Rprofile
+
+# ignore local data
+data/
+
