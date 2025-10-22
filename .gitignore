@@ -1,10 +1,14 @@
-﻿# Ignore Excel spreadsheets
+﻿#ignore environment variables with API keys
+.env
+*.env
+
+#ignore Excel spreadsheets
 *.xlsx
 *.xlsm
 *.xlsb
 *.xls
 ~$*.xls*
-# Ignore CSV and Excel files
+#ignore CSV and Excel files
 *.csv
 *.xls
 *.xlsx
@@ -16,6 +20,6 @@
 .Renviron
 .Rprofile
 
-# ignore local data
+#ignore local data
 data/
 
