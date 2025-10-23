@@ -176,14 +176,14 @@ for i, text_file in enumerate(all_text_files, start=1):
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         
-        print(f"  ✓ Saved\n")
+        print(f"  Saved\n")
         successful += 1
         
     except Exception as e:
-        print(f"  ✗ ERROR: {e}\n")
+        print(f"  ERROR: {e}\n")
         failed += 1
 
 #summary
-print(f"  Success: {successful}/{len(all_text_files)}")
+print(f"  Successes: {successful}/{len(all_text_files)}")
 print(f"  Failed: {failed}/{len(all_text_files)}")
-print(f"  JSON files saved in: {output_folder}")
+print(f"  JSON saved in: {output_folder}")
