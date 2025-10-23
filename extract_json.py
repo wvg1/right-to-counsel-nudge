@@ -147,3 +147,43 @@ all_text_files = list(input_folder.rglob("*.txt"))
 all_text_files = [f for f in all_text_files if f.name != "ERRORS.txt"]
 
 print(f"Found {len(all_text_files)} text files to process\n")
+
+# Process all files
+successful = 0
+failed = 0
+
+for i, text_file in enumerate(all_text_files, start=1):
+    print(f"[{i}/{len(all_text_files)}] {text_file.name}")
+    
+    try:
+        #read file
+        text = read_text_file(text_file)
+        
+        #extract JSON
+        json_string = extract_json_from_text(text)
+        
+        #ensure validity
+        data = json.loads(json_string)
+        
+        #identify output path
+        output_path = output_folder / text_file.relative_to(input_folder)
+        output_path = output_path.with_suffix(".json")
+        
+        #create subfolders (if needed)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        #save JSON file
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        
+        print(f"  ✓ Saved\n")
+        successful += 1
+        
+    except Exception as e:
+        print(f"  ✗ ERROR: {e}\n")
+        failed += 1
+
+#summary
+print(f"  Success: {successful}/{len(all_text_files)}")
+print(f"  Failed: {failed}/{len(all_text_files)}")
+print(f"  JSON files saved in: {output_folder}")
