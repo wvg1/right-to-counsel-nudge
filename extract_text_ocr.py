@@ -1,7 +1,7 @@
 """
 This script performs OCR on a set of PDFs using Azure Document Intelligence.
 PDFs should be in zipped case folders in right-to-counsel-nudge/data
-Set Documents/right-to-counsel nudge as working directory before running
+Set Documents/right-to-counsel-nudge as working directory before running
 
 """
 import os
@@ -148,8 +148,8 @@ def process_all_pdfs(root_folder, output_folder):
 if __name__ == "__main__":
     #define paths
     zip_folder = r"data\RCT Case documents"
-    extracted_folder = "case_folders_extracted"
-    output_folder = "extracted_texts"
+    extracted_folder = "data\case_folders_extracted"
+    output_folder = "data\extracted_texts"
     
     #extract all zip files
     print("STEP 1: Extracting zip files")
