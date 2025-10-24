@@ -9,10 +9,18 @@ import sys
 import zipfile
 import time
 from pathlib import Path
+from dotenv import load_dotenv
 
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+
+#load environment variables from .env file
+load_dotenv()
+
+endpoint = os.getenv("ENDPOINT_URL")
+deployment = os.getenv("DEPLOYMENT_NAME")
+subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
 #extract all zip files in root directory
 def extract_zips(zip_folder, extract_to):
