@@ -84,7 +84,7 @@ Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and n
 - If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that was rescheduled, canceled, stricken, or another similar term, set "hearing_date" to "".
 
 DEFENDANT HEARING ATTENDANCE
-- If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that occurred, set "hearing_att" to "Yes" if the defendant (tenant) was in attendance at the hearing. Set "hearing_att" to "Yes" if parties attended the hearing.
+- If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that occurred, set "hearing_att" to "Yes" if the defendant (tenant) was in attendance at the hearing, else "No". Set "hearing_att" to "Yes" if parties attended the hearing.
 
 DEFENDANT (TENANT) LEGAL REPRESENTATION
 - If the document says that the defendant (tenant) was screened for eligibility for legal assistance from an attorney through the right to counsel program, set "rep_screened" to "Yes". If the defendant (tenant) was not screened for a court-appointed attorney, set "rep_screened" to "No."
@@ -93,23 +93,26 @@ DEFENDANT (TENANT) LEGAL REPRESENTATION
 - If the document says that the defendant (tenant) was not eligible or was denied an attorney through the right to counsel program, set "rep_denied" to "Yes". If the document does not indicate that the defendant (tenant) waived their right to an attorney, set "rep_denied" to "No."
 
 WRIT OF RESTITUTION (EVICTION JUDGMENT)
- - If the document indicates that the court or judge ordered a writ of restitution to be issued in the case, set "writ" to "Yes". If the document does not indicate that the court or judge ordered a writ (for example, in a motion by one side that is not signed or approved by a judge), set "writ" to "No".
- - If the document indicates that the court or judge ordered a writ of restitution to be stayed (temporarily postponed) or vacated (canceled) in the case, set "writ_stayed_vacated" to "Yes".
-
+ - If the document indicates that the court or judge ordered a writ of restitution (eviction judgment) to be issued in the case, set "writ" to "Yes". If the document does not indicate that the court or judge ordered a writ (for example, in a motion by one side that is not signed or approved by a judge), set "writ" to "".
+ - Do not include motions that were not approved by the court or a judge when setting "writ". If the document contains text from a motion but no indication that it was approved, set "writ" to "".
+ - If the document indicates that the court or judge approved an order overturning, canceling, or vacating a writ of restitution in the case, set "writ_stayed_vacated" to "Yes".
+ 
 MONETARY JUDGMENT
 - If the document indicates that the court or judge issued a ruling stating that the defendant (tenant) must pay the plaintiff (landlord), set "monetary_judgment" as the numerical sum of all fees, costs, back rent, and other monetary damages awarded in the case.
 
 DISMISSAL
  - If the document indicates that the court or judge ordered a dismissal to be issued in the case, or that the plaintiff (landlord) or plaintiff's attorney requested a dismissal of the case, set "dismissal" to "Yes".
- - If the document indicates that the court or judge ordered a dismissal to be or vacated (canceled or overturned) in the case, set "dismissal_vacated" to "Yes".
+ - Do not include motions that were not approved by the court or a judge when setting "dismissal". If the document contains text from a motion but no indication that it was approved, set "dismissal" to "".
+ - If the document indicates that the court or judge approved an order overturning, canceling, or vacating a dismissal in the case, set "dismissal_vacated" to "Yes".
 
 ORDER FOR LIMITED DISSEMINATION
-- If the document indicates that the court or judge approved an order preventing dissemination of the case record in tenant screening files (an "Order for Limited Dissemination"), set "old" to "Yes".
-- Do not include motions that were not approved by the court or a judge. If the document contains text from a motion but no indication that it was approved, set "old" to "No".
- - If the document indicates that the court or judge approved an order overturning, canceling, or vacating an order for limited dissemination in the case, set "dismissal_vacated" to "Yes".
+- If the document indicates that the court or judge approved an order preventing dissemination (OLD) of the case record in tenant screening files (an "Order for Limited Dissemination"), set "old" to "Yes".
+- Do not include motions that were not approved by the court or a judge when setting "old". If the document contains text from a motion but no indication that it was approved, set "old" to "".
+- If the document indicates that the court or judge approved an order overturning, canceling, or vacating an order for limited dissemination in the case, set "old_vacated" to "Yes".
 
 AGREEMENT TO MOVE
 - If the document indicates that the plaintiff (landlord) and defendant (tenant) came to an agreement or stipulation that the tenant would move, terminate the tenancy, or vacate the premises, set "agreement_to_move" as "Yes".
+- Exclude documents summarizing a sherriff's return on a writ of restitution. For these documents, set "agreement_to_move" to "".
 
 Return only the JSON object described above."""
 
