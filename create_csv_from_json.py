@@ -9,10 +9,6 @@ import pandas as pd
 from pathlib import Path
 from collections import defaultdict
 
-#clean case_number
-
-
-
 #find all JSON files
 json_folder = Path("data/extracted_json")
 all_json_files = list(json_folder.rglob("*.json"))
@@ -56,7 +52,7 @@ data_cols = [col for col in df.columns if not col.startswith("_")]
 meta_cols = [col for col in df.columns if col.startswith("_")]
 df = df[data_cols + meta_cols]
 
-#save case-level .csv
+#save .csv
 output_file = Path("data/consolidated_cases.csv")
 df.to_csv(output_file, index=False)
 
