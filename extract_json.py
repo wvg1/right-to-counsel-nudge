@@ -65,7 +65,7 @@ CASE NUMBER
 - If you cannot form exactly 9 digits in that pattern with high confidence, set "case_number": "".
 
 APPEARANCE DATE
-- If the document contains the text of an answer, response, or appearance document submitted by the defendant (tenant) in response to a summons, complaint or the case filed against them, set "appearance_date" to the date that that document was filed.
+- If the document contains the text of an answer, response, or appearance document submitted by the defendant (tenant) in response to a summons, complaint or the case filed against them, set "appearance_date" to the date that the document was filed.
 - Set "appearance date" based on when the document was filed in the court, rather than when it was signed.
 Search priority (stop at the first match that fits):
 A clerk/e-filing stamp or header with words like "FILED", "E-FILED", "ACCEPTED", "ENTERED", "RECEIVED", "SUBMITTED", near a date/time.
