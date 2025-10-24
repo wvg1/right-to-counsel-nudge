@@ -1,6 +1,5 @@
 """
 This script cleans and consolidates all individual JSON output into one CSV for R analysis.
-Cleans case numbres, and combines multiple documents per case into single case-level rows.
 Working directory should be set as right-to-counsel-nudge folder.
 Make sure extract_json.py has already been run.
 """
@@ -43,20 +42,14 @@ for json_file in all_json_files:
 
 print(f"Found {len(case_data)} unique case folders\n")
 
-#merge multiple documents per case
-print("Merging documents by case...\n")
-
-### FIGURE OUT STRATEGY FOR MERGING ###
-
-#merge all cases
-merged_cases = []
-for case_folder, documents in case_data.items():
-    merged = merge_case_documents(documents)
-    merged["_case_folder"] = case_folder
-    merged_cases.append(merged)
-
 #convert to dataframe
-df = pd.DataFrame(merged_cases)
+all_cases = [
+    {**data_point, "case_folder": folder}
+    for folder, docs in case_data.items()
+    for data_point in docs
+]
+
+df = pd.DataFrame(all_cases)
 
 #reorder columns: data fields first, then metadata
 data_cols = [col for col in df.columns if not col.startswith("_")]
