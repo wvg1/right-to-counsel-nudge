@@ -1,13 +1,14 @@
 """
 This script performs OCR on a set of PDFs using Azure Document Intelligence.
-PDFs should be in zipped case folders in right-to-counsel-nudge/data
-Set Documents/right-to-counsel-nudge as working directory before running
+PDFs should be in zipped case folders in right-to-counsel-nudge/data.
+Set Documents/right-to-counsel-nudge as working directory before running.
 
 """
 import os
 import sys
 import zipfile
 import time
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -57,7 +58,7 @@ if not endpoint or not key:
     raise SystemExit("Set AZURE_DI_ENDPOINT and AZURE_DI_KEY.")
 client = DocumentIntelligenceClient(endpoint, AzureKeyCredential(key))
 
-#extract text from PDFs with a defined path
+#extract text from PDFs with quality assessment
 def extract_text(path):
     with open(path, "rb") as f:
         pdf_bytes = f.read()
@@ -74,18 +75,73 @@ def extract_text(path):
     if result.content:
         text = result.content
     else:
-        text = ""  #return empty string if no text
+        text = ""
     
-    return text
+    #calculate OCR quality score based on result properties
+    ocr_quality_score = calculate_ocr_quality(result)
+    ocr_notes = generate_ocr_notes(result)
+    
+    return text, ocr_quality_score, ocr_notes
+
+#calculate OCR quality score from 0.0 to 1.0
+def calculate_ocr_quality(result):
+    """Assess OCR quality based on Azure Document Intelligence result."""
+    score = 1.0
+    
+    #check for confidence in pages
+    if result.pages:
+        confidence_scores = []
+        for page in result.pages:
+            if hasattr(page, 'confidence') and page.confidence:
+                confidence_scores.append(page.confidence)
+        
+        if confidence_scores:
+            avg_confidence = sum(confidence_scores) / len(confidence_scores)
+            score = min(1.0, max(0.0, avg_confidence))
+        else:
+            score = 0.7  #default if no confidence available
+    else:
+        score = 0.0  #no pages detected
+    
+    return round(score, 2)
+
+#generate OCR quality notes
+def generate_ocr_notes(result):
+    """Generate brief notes about OCR quality and potential issues."""
+    notes = []
+    
+    if not result.pages:
+        return "No pages detected in document"
+    
+    page_count = len(result.pages)
+    
+    #check for blank pages or low content
+    for i, page in enumerate(result.pages, 1):
+        if hasattr(page, 'lines') and not page.lines:
+            notes.append(f"Page {i} appears blank")
+    
+    #check overall content length
+    if result.content and len(result.content.strip()) < 100:
+        notes.append("Minimal text extracted - document may be scanned image")
+    
+    if not result.content:
+        notes.append("No text content extracted")
+    
+    if page_count > 50:
+        notes.append(f"Large document ({page_count} pages) - may contain mixed quality")
+    
+    return "; ".join(notes) if notes else ""
 
 #find all PDFs in case folders recursively
-def process_all_pdfs(root_folder, output_folder):
-    """Process all PDFs in case folders and save extracted text."""
+def process_all_pdfs(root_folder, output_folder, metadata_folder):
+    """Process all PDFs in case folders and save extracted text with metadata."""
     root_folder = Path(root_folder)
     output_folder = Path(output_folder)
+    metadata_folder = Path(metadata_folder)
     
-    #create output folder if it doesn't exist
+    #create output folders if they don't exist
     output_folder.mkdir(parents=True, exist_ok=True)
+    metadata_folder.mkdir(parents=True, exist_ok=True)
     
     #find all PDFs recursively
     all_pdfs = list(root_folder.rglob("*.pdf"))
@@ -101,6 +157,7 @@ def process_all_pdfs(root_folder, output_folder):
     successful = 0
     failed = 0
     failed_files = []
+    quality_scores = []
     
     #loop through each PDF 
     for i, pdf_path in enumerate(all_pdfs, start=1):
@@ -110,7 +167,8 @@ def process_all_pdfs(root_folder, output_folder):
         
         try:
             #extract text using our function
-            text = extract_text(pdf_path)
+            text, ocr_quality_score, ocr_notes = extract_text(pdf_path)
+            quality_scores.append(ocr_quality_score)
             time.sleep(0.5)
             
             #create output path preserving folder structure
@@ -118,18 +176,30 @@ def process_all_pdfs(root_folder, output_folder):
             output_path = output_folder / relative_path
             output_path = output_path.with_suffix(".txt")
             
-            #create subfolder if needed
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            #create metadata path
+            metadata_path = metadata_folder / relative_path
+            metadata_path = metadata_path.with_suffix(".json")
             
-            #save the extracted text with metadata
+            #create subfolders if needed
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            #save the extracted text
             with open(output_path, "w", encoding="utf-8") as f:
-                f.write(f"SOURCE_FILE: {pdf_path}\n")
-                f.write(f"CASE_FOLDER: {case_folder}\n")
-                f.write(f"RELATIVE_PATH: {relative_path}\n")
-                f.write("="*70 + "\n\n")
                 f.write(text)
             
-            print(f"saved\n")
+            #save metadata
+            metadata = {
+                "source_file": str(pdf_path),
+                "case_folder": case_folder,
+                "relative_path": str(relative_path),
+                "ocr_quality_score": ocr_quality_score,
+                "ocr_notes": ocr_notes
+            }
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+            
+            print(f"saved (quality: {ocr_quality_score})\n")
             successful += 1
         except Exception as e:
             #log errors and continue
@@ -142,6 +212,11 @@ def process_all_pdfs(root_folder, output_folder):
     print(f"  Successful: {successful}/{total_pdfs}")
     print(f"  Failed: {failed}/{total_pdfs}")
     print(f"  Output folder: {output_folder}")
+    print(f"  Metadata folder: {metadata_folder}")
+    
+    if quality_scores:
+        avg_quality = sum(quality_scores) / len(quality_scores)
+        print(f"  Average OCR quality: {avg_quality:.2f}")
     
     #save error log if there were failures
     if failed_files:
@@ -156,8 +231,9 @@ def process_all_pdfs(root_folder, output_folder):
 if __name__ == "__main__":
     #define paths
     zip_folder = r"data\RCT Case documents"
-    extracted_folder = "data\case_folders_extracted"
-    output_folder = "data\extracted_texts"
+    extracted_folder = r"data\case_folders_extracted"
+    output_folder = r"data\extracted_texts"
+    metadata_folder = r"data\ocr_metadata"
     
     #extract all zip files
     print("STEP 1: Extracting zip files")
@@ -167,4 +243,4 @@ if __name__ == "__main__":
     #process all PDFs
     print("\nSTEP 2: Processing PDFs with OCR")
     print("="*70)
-    process_all_pdfs(extracted_folder, output_folder)
+    process_all_pdfs(extracted_folder, output_folder, metadata_folder)

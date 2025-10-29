@@ -1,6 +1,7 @@
 """
 This script extracts JSON from OCR using Azure's Open AI service.
 It is designed to process text extracted via OCR from eviction case documents.
+Reads OCR metadata and includes quality scores in the output.
 Working directory should be set as right-to-counsel-nudge folder.
 """
 
@@ -34,23 +35,49 @@ SYSTEM_PROMPT = """You are an assistant that reads text extracted via optical ch
 
 Schema:
 {
-"case_number": "string",
-"appearance_date": "string",
-"hearing_held_date": "string",
-"hearing_att": "string",
-"rep_screened": "string",
-"rep_appointed": "string",
-"rep_waived": "string",
-"rep_denied": "string",
-"writ": "string",
-"writ_stayed_vacated": "string",
-"monetary_judgment": "string",
-"dismissal": "string",
-"dismissal_vacated": "string",
-"old": "string",
-"old_vacated": "string",
-"agreement_to_move": "string"
+  "case_number": "string",
+  "appearance_date": "string",
+  "hearing_held_date": "string",
+  "hearing_att": "string",
+  "rep_screened": "string",
+  "rep_appointed": "string",
+  "rep_waived": "string",
+  "rep_denied": "string",
+  "writ": "string",
+  "writ_stayed_vacated": "string",
+  "monetary_judgment": "string",
+  "dismissal": "string",
+  "dismissal_vacated": "string",
+  "old": "string",
+  "old_vacated": "string",
+  "agreement_to_move": "string",
+  "confidence": {
+    "case_number": 0.0,
+    "appearance_date": 0.0,
+    "hearing_held_date": 0.0,
+    "hearing_att": 0.0,
+    "rep_screened": 0.0,
+    "rep_appointed": 0.0,
+    "rep_waived": 0.0,
+    "rep_denied": 0.0,
+    "writ": 0.0,
+    "writ_stayed_vacated": 0.0,
+    "monetary_judgment": 0.0,
+    "dismissal": 0.0,
+    "dismissal_vacated": 0.0,
+    "old": 0.0,
+    "old_vacated": 0.0,
+    "agreement_to_move": 0.0
+  }
 }
+
+CONFIDENCE SCORES
+- For each field, provide a confidence score from 0.0 to 1.0.
+- 1.0 = highly confident (explicit, clear evidence in document)
+- 0.7-0.9 = moderately confident (clear but with minor ambiguity)
+- 0.4-0.6 = low-moderate confidence (some evidence but uncertain interpretation)
+- 0.0-0.3 = low confidence (little evidence, mostly guessing, or field is empty)
+- Empty fields should generally have confidence 0.0 unless there is explicit evidence of absence.
 
 STRICT RULES
 - If a string field is unknown, set it to "" (empty string).
@@ -122,6 +149,21 @@ def read_text_file(file_path):
         text = f.read()
     return text
 
+#function to read OCR metadata
+def read_ocr_metadata(text_file_path, metadata_folder):
+    """Read OCR metadata JSON for this text file."""
+    relative_path = text_file_path.relative_to(Path("data/extracted_texts"))
+    metadata_path = metadata_folder / relative_path.with_suffix(".json")
+    
+    try:
+        if metadata_path.exists():
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"  Warning: Could not read metadata: {e}")
+    
+    return None
+
 #function to send text to Azure OpenAI and get structured JSON
 def extract_json_from_text(text_content):
     response = client.chat.completions.create(
@@ -141,6 +183,7 @@ def extract_json_from_text(text_content):
 #identify folders
 input_folder = Path("data/extracted_texts")
 output_folder = Path("data/extracted_json")
+metadata_folder = Path("data/ocr_metadata")
 
 #create output folder if it doesn't exist already
 output_folder.mkdir(exist_ok=True)
@@ -167,6 +210,12 @@ for i, text_file in enumerate(all_text_files, start=1):
         
         #ensure validity
         data = json.loads(json_string)
+        
+        #read OCR metadata and add quality score
+        metadata = read_ocr_metadata(text_file, metadata_folder)
+        if metadata:
+            data["ocr_quality_score"] = metadata.get("ocr_quality_score", None)
+            data["ocr_notes"] = metadata.get("ocr_notes", "")
         
         #identify output path
         output_path = output_folder / text_file.relative_to(input_folder)
