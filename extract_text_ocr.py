@@ -1,6 +1,6 @@
 """
 This script performs OCR on a set of PDFs using Azure Document Intelligence.
-PDFs should be in zipped case folders in right-to-counsel-nudge/data.
+PDFs should be in zipped case folders in right-to-counsel-nudge/data/RCT Case Documents.
 Set Documents/right-to-counsel-nudge as working directory before running.
 
 """
@@ -83,31 +83,36 @@ def extract_text(path):
     
     return text, ocr_quality_score, ocr_notes
 
-#calculate OCR quality score from 0.0 to 1.0
+#calculate OCR quality score from 0.0 to 1.0 using word-level confidence
 def calculate_ocr_quality(result):
-    """Assess OCR quality based on Azure Document Intelligence result."""
-    score = 1.0
+    """assess OCR quality based on Azure Document Intelligence word-level confidence."""
     
-    #check for confidence in pages
-    if result.pages:
-        confidence_scores = []
-        for page in result.pages:
-            if hasattr(page, 'confidence') and page.confidence:
-                confidence_scores.append(page.confidence)
-        
-        if confidence_scores:
-            avg_confidence = sum(confidence_scores) / len(confidence_scores)
-            score = min(1.0, max(0.0, avg_confidence))
-        else:
-            score = 0.7  #default if no confidence available
-    else:
-        score = 0.0  #no pages detected
+    if not result.pages:
+        return 0.0
     
-    return round(score, 2)
+    confidence_scores = []
+    
+    # Extract confidence from words across all pages
+    for page in result.pages:
+        if hasattr(page, 'words') and page.words:
+            for word in page.words:
+                if hasattr(word, 'confidence') and word.confidence is not None:
+                    confidence_scores.append(word.confidence)
+    
+    # If we have confidence scores, use them
+    if confidence_scores:
+        avg_confidence = sum(confidence_scores) / len(confidence_scores)
+        return round(avg_confidence, 2)
+    
+    # Fallback: estimate based on content
+    if result.content and len(result.content.strip()) > 100:
+        return 0.75  # Assume reasonable quality if substantial text extracted
+    
+    return 0.5  # Low confidence if no metrics available
 
 #generate OCR quality notes
 def generate_ocr_notes(result):
-    """Generate brief notes about OCR quality and potential issues."""
+    """generate notes about OCR quality and potential issues"""
     notes = []
     
     if not result.pages:
@@ -134,7 +139,7 @@ def generate_ocr_notes(result):
 
 #find all PDFs in case folders recursively
 def process_all_pdfs(root_folder, output_folder, metadata_folder):
-    """Process all PDFs in case folders and save extracted text with metadata."""
+    """process all PDFs in case folders and save extracted text with metadata"""
     root_folder = Path(root_folder)
     output_folder = Path(output_folder)
     metadata_folder = Path(metadata_folder)
@@ -217,6 +222,16 @@ def process_all_pdfs(root_folder, output_folder, metadata_folder):
     if quality_scores:
         avg_quality = sum(quality_scores) / len(quality_scores)
         print(f"  Average OCR quality: {avg_quality:.2f}")
+        
+        #print quality distribution
+        low_quality = sum(1 for score in quality_scores if score < 0.7)
+        medium_quality = sum(1 for score in quality_scores if 0.7 <= score < 0.9)
+        high_quality = sum(1 for score in quality_scores if score >= 0.9)
+        
+        print(f"\n  Quality Distribution:")
+        print(f"    High (≥0.9): {high_quality} ({high_quality/len(quality_scores)*100:.1f}%)")
+        print(f"    Medium (0.7-0.89): {medium_quality} ({medium_quality/len(quality_scores)*100:.1f}%)")
+        print(f"    Low (<0.7): {low_quality} ({low_quality/len(quality_scores)*100:.1f}%)")
     
     #save error log if there were failures
     if failed_files:
