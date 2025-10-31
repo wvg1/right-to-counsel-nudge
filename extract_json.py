@@ -15,6 +15,13 @@ import base64
 from openai import AzureOpenAI
 import json
 from pathlib import Path
+import time
+from openai import RateLimitError
+
+#settings to prevent rate limit issues
+BATCH_SIZE = 100  # Smaller than OCR since prompts are longer
+PAUSE_BETWEEN_BATCHES = 180  # 3 minutes (longer than OCR)
+RETRY_DELAY = 60  # Wait 1 minute on rate limit errors
 
 endpoint = os.getenv("ENDPOINT_URL")
 deployment = os.getenv("DEPLOYMENT_NAME")
@@ -194,19 +201,33 @@ all_text_files = [f for f in all_text_files if f.name != "ERRORS.txt"]
 
 print(f"Found {len(all_text_files)} text files to process\n")
 
-# Process all files
+#process all files
 successful = 0
 failed = 0
 
 for i, text_file in enumerate(all_text_files, start=1):
     print(f"[{i}/{len(all_text_files)}] {text_file.name}")
     
+    # Pause between batches
+    if i > 1 and (i - 1) % BATCH_SIZE == 0:
+        print(f"  Completed batch. Pausing for {PAUSE_BETWEEN_BATCHES} seconds...")
+        time.sleep(PAUSE_BETWEEN_BATCHES)
+    
     try:
         #read file
         text = read_text_file(text_file)
         
-        #extract JSON
-        json_string = extract_json_from_text(text)
+        #extract JSON with retry logic
+        for attempt in range(3):
+            try:
+                json_string = extract_json_from_text(text)
+                break
+            except RateLimitError as e:
+                if attempt < 2:
+                    print(f"  Rate limit hit, waiting {RETRY_DELAY}s...")
+                    time.sleep(RETRY_DELAY)
+                else:
+                    raise
         
         #ensure validity
         data = json.loads(json_string)
