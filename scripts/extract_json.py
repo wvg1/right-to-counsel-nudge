@@ -195,7 +195,7 @@ metadata_folder = Path("data/ocr_metadata")
 #create output folder if it doesn't exist already
 output_folder.mkdir(exist_ok=True)
 
-# Find all .txt files
+#find all .txt files
 all_text_files = list(input_folder.rglob("*.txt"))
 all_text_files = [f for f in all_text_files if f.name != "ERRORS.txt"]
 
@@ -208,7 +208,7 @@ failed = 0
 for i, text_file in enumerate(all_text_files, start=1):
     print(f"[{i}/{len(all_text_files)}] {text_file.name}")
     
-    # Pause between batches
+    #pause between batches
     if i > 1 and (i - 1) % BATCH_SIZE == 0:
         print(f"  Completed batch. Pausing for {PAUSE_BETWEEN_BATCHES} seconds...")
         time.sleep(PAUSE_BETWEEN_BATCHES)

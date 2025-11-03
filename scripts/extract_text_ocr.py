@@ -92,23 +92,23 @@ def calculate_ocr_quality(result):
     
     confidence_scores = []
     
-    # Extract confidence from words across all pages
+    #extract confidence from words across all pages
     for page in result.pages:
         if hasattr(page, 'words') and page.words:
             for word in page.words:
                 if hasattr(word, 'confidence') and word.confidence is not None:
                     confidence_scores.append(word.confidence)
     
-    # If we have confidence scores, use them
+    #use confidence scores if available
     if confidence_scores:
         avg_confidence = sum(confidence_scores) / len(confidence_scores)
         return round(avg_confidence, 2)
     
-    # Fallback: estimate based on content
+    #fallback: estimate based on content
     if result.content and len(result.content.strip()) > 100:
-        return 0.75  # Assume reasonable quality if substantial text extracted
+        return 0.75  #assume reasonable quality if substantial text extracted
     
-    return 0.5  # Low confidence if no metrics available
+    return 0.5  #low confidence if no metrics available
 
 #generate OCR quality notes
 def generate_ocr_notes(result):
