@@ -53,7 +53,7 @@ meta_cols = [col for col in df.columns if col.startswith("_")]
 df = df[data_cols + meta_cols]
 
 #save .csv
-output_file = Path("data/consolidated_cases.csv")
+output_file = Path("data/extracted_llm_data.csv")
 df.to_csv(output_file, index=False)
 
 print(f"\n✓ Saved {len(df)} cases to {output_file}")
