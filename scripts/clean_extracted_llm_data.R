@@ -41,7 +41,24 @@ invalid_cases_summary <- invalid_cases %>%
   summarize(n_docs = n()) %>%
   arrange(desc(n_docs))
 
-invalid_cases_summary
+invalid_cases_summary %>% print(n = Inf)
 
-###### match invalid case numbers to valid ones ######
+###### fuzzy match invalid case numbers to valid ones ######
+#create note column
+extracted_llm_data <- extracted_llm_data %>% mutate(note = "")
 
+#all valid cases
+valid_cases <- str_remove(list.files("data/RCT Case documents", pattern = "\\.zip$"), "\\.zip$") %>% sort()
+
+#apply fuzzy matching row-wise using Optimal String Alignment (OSA)
+extracted_llm_data <- extracted_llm_data %>%
+  rowwise() %>%
+  mutate(
+    final_case = if(case_number %in% invalid_cases_summary$case_number) {
+      valid_cases[which.min(stringdist(case_number, valid_cases, method = "osa"))]
+    } else {
+      case_number
+    },
+    note = if(case_number != final_case) "fuzzy_corrected" else note
+  ) %>%
+  ungroup()
