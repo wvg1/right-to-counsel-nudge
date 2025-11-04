@@ -16,7 +16,7 @@ key_fields <- c("case_number", "appearance_date", "hearing_held_date", "hearing_
                 "dismissal_vacated", "old", "old_vacated", "agreement_to_move")
 
 #drop rows where ALL key fields are blank or NA
-extracted_llm_data<- extracted_llm_data %>%
+extracted_llm_data <- extracted_llm_data %>%
   filter(!if_all(all_of(key_fields), ~is.na(.) | . == ""))
 
 ###### clean case numbers ######
@@ -43,54 +43,5 @@ invalid_cases_summary <- invalid_cases %>%
 
 invalid_cases_summary
 
-###### fuzzy match invalid case numbers to valid ones ######
-
-#find all potential matches within .15 threshold for each invalid case
-all_potential_matches <- invalid_cases_summary %>%
-  rowwise() %>%
-  mutate(
-    #calculate Jaro-Winkler distance to all valid cases
-    distances = list(data.frame(
-      valid_case = valid_cases,
-      distance = stringdist(case_number, valid_cases, method = "jw")
-    )),
-    #filter to matches within threshold, may need to adjust threshold
-    matches_within_threshold = list(
-      distances[[1]] %>% 
-        filter(distance < 0.15) %>%
-        arrange(distance)
-    )
-  ) %>%
-  ungroup()
-
-#view results, expand to see all matches per invalid case
-all_potential_matches_expanded <- all_potential_matches %>%
-  select(case_number, n_docs, matches_within_threshold) %>%
-  unnest(matches_within_threshold)
-
-print(all_potential_matches_expanded)
-
-match_summary <- all_potential_matches_expanded %>%
-  group_by(case_number) %>%
-  summarize(
-    n_docs = first(n_docs),
-    n_potential_matches = n(),
-    closest_match = valid_case[which.min(distance)],
-    closest_distance = min(distance)
-  ) %>%
-  arrange(desc(n_docs))
-
-print(match_summary)
-
-#cases with no matches in threshold
-no_matches <- all_potential_matches %>%
-  mutate(n_matches = nrow(matches_within_threshold[[1]])) %>%
-  filter(n_matches == 0) %>%
-  select(case_number, n_docs)
-
-if (nrow(no_matches) > 0) {
-  print(no_matches)
-}
-
-
+###### match invalid case numbers to valid ones ######
 
