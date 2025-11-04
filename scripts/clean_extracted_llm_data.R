@@ -43,81 +43,54 @@ invalid_cases_summary <- invalid_cases %>%
 
 invalid_cases_summary
 
+###### fuzzy match invalid case numbers to valid ones ######
 
-
-
-
-
-
-
-
-#create frequency count of unique case numbers
-case_frequency <- extracted_llm_data %>%
-  filter(case_number != "") %>%  #exclude empty case numbers
-  count(case_number, name = "n_docs") %>%
-  arrange(n_docs)
-
-case_frequency %>%
-  count(n_docs, name = "n_cases") %>%
-  print
-
-#likely errors (two or fewer docs)
-likely_errors <- case_frequency %>%
-  filter(n_docs <= 2) %>%
-  pull(case_number)
-
-#likely valid cases
-valid_cases <- case_frequency %>%
-  filter(n_docs > 2) %>%
-  pull(case_number)
-
-
-
-
-
-
-
-#parse LLM confidence scores from JSON list
-confidence_parsed <- extracted_llm_data %>%
+#find all potential matches within .15 threshold for each invalid case
+all_potential_matches <- invalid_cases_summary %>%
+  rowwise() %>%
   mutate(
-    confidence_fixed = str_replace_all(confidence, "'", '"'),
-    conf_data = map(confidence_fixed, ~fromJSON(.x, simplifyVector = TRUE))
+    #calculate Jaro-Winkler distance to all valid cases
+    distances = list(data.frame(
+      valid_case = valid_cases,
+      distance = stringdist(case_number, valid_cases, method = "jw")
+    )),
+    #filter to matches within threshold, may need to adjust threshold
+    matches_within_threshold = list(
+      distances[[1]] %>% 
+        filter(distance < 0.15) %>%
+        arrange(distance)
+    )
   ) %>%
-  select(X_source_file, case_folder, conf_data) %>%
-  unnest_wider(conf_data)
+  ungroup()
 
-#collect all confidence level column names
-conf_cols <- setdiff(names(confidence_parsed), c("X_source_file", "case_folder"))
+#view results, expand to see all matches per invalid case
+all_potential_matches_expanded <- all_potential_matches %>%
+  select(case_number, n_docs, matches_within_threshold) %>%
+  unnest(matches_within_threshold)
 
-#ensure all confidence level columns are numeric
-confidence_parsed <- confidence_parsed %>%
-  mutate(across(all_of(conf_cols), ~as.numeric(unlist(.))))
+print(all_potential_matches_expanded)
 
-#summary statistics for each confidence level column
-conf_summary <- confidence_parsed %>%
-  select(all_of(conf_cols)) %>%
-  pivot_longer(everything(), names_to = "field", values_to = "confidence") %>%
-  group_by(field) %>%
-  summarise(
-    mean = round(mean(confidence[confidence > 0], na.rm = TRUE), 3),
-    median = round(median(confidence[confidence > 0], na.rm = TRUE), 3),
-    min = round(min(confidence, na.rm = TRUE), 3),
-    max = if(any(confidence > 0)) round(max(confidence[confidence > 0], na.rm = TRUE), 3) else 0,
-    pct_zero = round(mean(confidence == 0, na.rm = TRUE) * 100, 1),
-    pct_low = round(mean(confidence[confidence > 0] < 0.9, na.rm = TRUE) * 100, 1),
-    pct_high = round(mean(confidence[confidence > 0] >= 0.9, na.rm = TRUE) * 100, 1)
+match_summary <- all_potential_matches_expanded %>%
+  group_by(case_number) %>%
+  summarize(
+    n_docs = first(n_docs),
+    n_potential_matches = n(),
+    closest_match = valid_case[which.min(distance)],
+    closest_distance = min(distance)
   ) %>%
-  arrange(desc(mean))
+  arrange(desc(n_docs))
 
-print(conf_summary, n = Inf)
+print(match_summary)
 
-####### clean case numbers #######
-#create frequency count of unique case numbers
-case_frequency <- extracted_llm_data %>%
-  filter(case_number != "") %>%  #exclude empty case numbers
-  count(case_number, name = "n_docs") %>%
-  arrange(n_docs)
+#cases with no matches in threshold
+no_matches <- all_potential_matches %>%
+  mutate(n_matches = nrow(matches_within_threshold[[1]])) %>%
+  filter(n_matches == 0) %>%
+  select(case_number, n_docs)
 
-case_frequency %>%
-  count(n_docs, name = "n_cases") %>%
-  print
+if (nrow(no_matches) > 0) {
+  print(no_matches)
+}
+
+
+
