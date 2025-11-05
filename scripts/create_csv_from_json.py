@@ -2,6 +2,7 @@
 This script cleans and consolidates all individual JSON output into one CSV for R analysis.
 Working directory should be set as right-to-counsel-nudge folder.
 Make sure extract_json.py has already been run.
+Organizes data by case number folders.
 """
 
 import json
@@ -20,7 +21,7 @@ if len(all_json_files) == 0:
 
 print(f"Found {len(all_json_files)} JSON files\n")
 
-#group by case folder
+#group by case number
 case_data = defaultdict(list)
 
 for json_file in all_json_files:
@@ -30,18 +31,18 @@ for json_file in all_json_files:
             
         #add metadata
         data["_source_file"] = json_file.name
-        case_folder = json_file.parent.name
-        case_data[case_folder].append(data)
+        case_number = json_file.parent.name
+        case_data[case_number].append(data)
         
     except Exception as e:
         print(f"⚠️  Could not load {json_file.name}: {e}")
 
-print(f"Found {len(case_data)} unique case folders\n")
+print(f"Found {len(case_data)} unique case numbers\n")
 
 #convert to dataframe
 all_cases = [
-    {**data_point, "case_folder": folder}
-    for folder, docs in case_data.items()
+    {**data_point, "case_number_folder": case_num}
+    for case_num, docs in case_data.items()
     for data_point in docs
 ]
 

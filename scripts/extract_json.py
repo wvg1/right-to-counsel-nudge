@@ -2,6 +2,7 @@
 This script extracts JSON from OCR using Azure's Open AI service.
 It is designed to process text extracted via OCR from eviction case documents.
 Reads OCR metadata and includes quality scores in the output.
+Each case is organized into its own folder named by case number.
 Working directory should be set as right-to-counsel-nudge folder.
 """
 
@@ -99,48 +100,43 @@ CASE NUMBER
 - If you cannot form exactly 9 digits in that pattern with high confidence, set "case_number": "".
 
 APPEARANCE DATE
-- If the document contains the text of an answer, response, or appearance document submitted by the defendant (tenant) in response to a summons, complaint or the case filed against them, set "appearance_date" to the date that the document was filed.
+- If the document contains the text of an answer or response submitted by the defendant (tenant) in response to a summons, complaint or the case filed against them, set "appearance_date" to the date that the document was filed.
 - Set "appearance date" based on when the document was filed in the court, rather than when it was signed.
-Search priority (stop at the first match that fits):
-A clerk/e-filing stamp or header with words like "FILED", "E-FILED", "ACCEPTED", "ENTERED", "RECEIVED", "SUBMITTED", near a date/time.
-A docket/header watermark showing a file/entry date.
-Ignore signature dates, notary acknowledgments, certificate of service/mailing dates, "DATED this …" lines, and any dates inside the narrative body.
-If only a 2-digit year is present, assume 2000–2099 (e.g., 9/5/24 → 2024-09-05).
-Normalize "appearance_date" to ISO "YYYY-MM-DD".
-Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and normalize to "YYYY-MM-DD".
+- If only a 2-digit year is present, assume 2000–2099 (e.g., 9/5/24 → 2024-09-05).
+- Normalize "appearance_date" to ISO "YYYY-MM-DD".
+- Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and normalize to "YYYY-MM-DD".
 
 HEARING HELD DATE
-- If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that occurred, set "hearing_held_date" to the date that the hearing occurred.
-Normalize "hearing_held_date" to ISO "YYYY-MM-DD".
-If only a 2-digit year is present, assume 2000-2099 (e.g., 9/5/24 → 2024-09-05).
-Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and normalize to "YYYY-MM-DD".
-
-- If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that was rescheduled, canceled, stricken, or another similar term, set "hearing_date" to "".
+- If the document contains hearing minutes from a case for a hearing that occurred, set "hearing_held_date" to the date that the hearing occurred.
+- Normalize "hearing_held_date" to ISO "YYYY-MM-DD".
+- If only a 2-digit year is present, assume 2000-2099 (e.g., 9/5/24 → 2024-09-05).
+- Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and normalize to "YYYY-MM-DD".
+- If the document contains hearing minutes from a case for a hearing that was rescheduled, canceled, stricken, or another similar term, set "hearing_date" to "".
 
 DEFENDANT HEARING ATTENDANCE
-- If the document contains a summary of a hearing, description of events at a hearing, or hearing minutes from a case for a hearing that occurred, set "hearing_att" to "Yes" if the defendant (tenant) was in attendance at the hearing, else "No". Set "hearing_att" to "Yes" if parties attended the hearing.
+- If the document contains hearing minutes from a case for a hearing that occurred, set "hearing_att" to "Yes" if the defendant (tenant) was in attendance at the hearing, else "No". Assume "hearing_att" to "Yes" if parties attended the hearing with no further details provided.
 
 DEFENDANT (TENANT) LEGAL REPRESENTATION
-- If the document says that the defendant (tenant) was screened for eligibility for legal assistance from an attorney through the right to counsel program, set "rep_screened" to "Yes". If the defendant (tenant) was not screened for a court-appointed attorney, set "rep_screened" to "No."
-- If the document says that the defendant (tenant) had an attorney appointed through the right to counsel program, set "rep_appointed" to "Yes". If the document does not indicate that the defendant (tenant) had an attorney appointed, set "rep_appointed" to "No."
-- If the document says that the defendant (tenant) declined an attorney appointed through the right to counsel program or waived their right to an attorney, set "rep_waived" to "Yes". If the document does not indicate that the defendant (tenant) waived their right to an attorney, set "rep_waived" to "No."
-- If the document says that the defendant (tenant) was not eligible or was denied an attorney through the right to counsel program, set "rep_denied" to "Yes". If the document does not indicate that the defendant (tenant) waived their right to an attorney, set "rep_denied" to "No."
+- If the document says that the defendant (tenant) was screened for eligibility for legal assistance from an attorney through the right to counsel program, set "rep_screened" to "Yes". If the document does not indicate that the defendant (tenant) was screened for a court-appointed attorney, set "rep_screened" to "".
+- If the document says that the defendant (tenant) had an attorney appointed through the right to counsel program, set "rep_appointed" to "Yes". If the document does not indicate that the defendant (tenant) had an attorney appointed, set "rep_appointed" to "".
+- If the document says that the defendant (tenant) declined an attorney appointed through the right to counsel program or waived their right to an attorney, set "rep_waived" to "Yes". If the document does not indicate that the defendant (tenant) waived their right to an attorney, set "rep_waived" to "".
+- If the document says that the defendant (tenant) was not eligible or was denied an attorney through the right to counsel program, set "rep_denied" to "Yes". If the document does not indicate that the defendant (tenant) waived their right to an attorney, set "rep_denied" to "".
 
 WRIT OF RESTITUTION (EVICTION JUDGMENT)
- - If the document indicates that the court or judge ordered a writ of restitution (eviction judgment) to be issued in the case, set "writ" to "Yes". If the document does not indicate that the court or judge ordered a writ (for example, in a motion by one side that is not signed or approved by a judge), set "writ" to "".
- - Do not include motions that were not approved by the court or a judge when setting "writ". If the document contains text from a motion but no indication that it was approved, set "writ" to "".
- - If the document indicates that the court or judge approved an order overturning, canceling, or vacating a writ of restitution in the case, set "writ_stayed_vacated" to "Yes".
+ - If the document indicates that the court or judge ordered a writ of restitution (eviction judgment) to be issued in the case, set "writ" to "Yes". If the document does not indicate that the court or judge ordered a writ, set "writ" to "".
+ - Do not include motions that were not approved by the court or a judge when setting "writ". If the document contains text from a motion but no indication that it was approved by the judge or a court, set "writ" to "".
+ - If the document indicates that the court or judge approved an order overturning, canceling, or vacating a writ of restitution in the case, set "writ__stayed_vacated" to "Yes".
  
 MONETARY JUDGMENT
 - If the document indicates that the court or judge issued a ruling stating that the defendant (tenant) must pay the plaintiff (landlord), set "monetary_judgment" as the numerical sum of all fees, costs, back rent, and other monetary damages awarded in the case.
 
 DISMISSAL
  - If the document indicates that the court or judge ordered a dismissal to be issued in the case, or that the plaintiff (landlord) or plaintiff's attorney requested a dismissal of the case, set "dismissal" to "Yes".
- - Do not include motions that were not approved by the court or a judge when setting "dismissal". If the document contains text from a motion but no indication that it was approved, set "dismissal" to "".
+ - If the document contains text from a motion by the defendant but no indication that it was approved, set "dismissal" to "".
  - If the document indicates that the court or judge approved an order overturning, canceling, or vacating a dismissal in the case, set "dismissal_vacated" to "Yes".
 
 ORDER FOR LIMITED DISSEMINATION
-- If the document indicates that the court or judge approved an order preventing dissemination (OLD) of the case record in tenant screening files (an "Order for Limited Dissemination"), set "old" to "Yes".
+- If the document indicates that the court or judge approved an order preventing dissemination of the case record during tenant screening (an "Order for Limited Dissemination"), set "old" to "Yes".
 - Do not include motions that were not approved by the court or a judge when setting "old". If the document contains text from a motion but no indication that it was approved, set "old" to "".
 - If the document indicates that the court or judge approved an order overturning, canceling, or vacating an order for limited dissemination in the case, set "old_vacated" to "Yes".
 
@@ -206,7 +202,9 @@ successful = 0
 failed = 0
 
 for i, text_file in enumerate(all_text_files, start=1):
-    print(f"[{i}/{len(all_text_files)}] {text_file.name}")
+    #extract case number from folder structure
+    case_number = text_file.parent.name
+    print(f"[{i}/{len(all_text_files)}] {case_number}/{text_file.name}")
     
     #pause between batches
     if i > 1 and (i - 1) % BATCH_SIZE == 0:
@@ -238,7 +236,7 @@ for i, text_file in enumerate(all_text_files, start=1):
             data["ocr_quality_score"] = metadata.get("ocr_quality_score", None)
             data["ocr_notes"] = metadata.get("ocr_notes", "")
         
-        #identify output path
+        #identify output path preserving case number folder structure
         output_path = output_folder / text_file.relative_to(input_folder)
         output_path = output_path.with_suffix(".json")
         

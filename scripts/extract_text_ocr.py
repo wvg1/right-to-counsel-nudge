@@ -1,6 +1,7 @@
 """
 This script performs OCR on a set of PDFs using Azure Document Intelligence.
 PDFs should be in zipped case folders in right-to-counsel-nudge/data/RCT Case Documents.
+Each zip file is extracted into its own folder named after the case number.
 Set Documents/right-to-counsel-nudge as working directory before running.
 
 """
@@ -23,9 +24,9 @@ endpoint = os.getenv("ENDPOINT_URL")
 deployment = os.getenv("DEPLOYMENT_NAME")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
-#extract all zip files in root directory
+#extract all zip files into case-specific folders
 def extract_zips(zip_folder, extract_to):
-    """extract zips in zip_folder to extract_to directory """
+    """extract zips in zip_folder to extract_to directory, each zip into its own case folder"""
     zip_folder = Path(zip_folder)
     extract_to = Path(extract_to)
 
@@ -33,23 +34,38 @@ def extract_zips(zip_folder, extract_to):
     extract_to.mkdir(parents=True, exist_ok=True)
 
     #identify all zip files
-    zip_files = list(zip_folder.glob("*.zip"))
+    zip_files = sorted(list(zip_folder.glob("*.zip")))
     if not zip_files:
         print(f"no zip files found")
         return
     
-    print(f"found {len(zip_files)} zip files")
+    print(f"found {len(zip_files)} zip files\n")
 
-    for zip_path in zip_files:
-        print(f"extracting: {zip_path.name}")
+    successful = 0
+    failed = 0
+    
+    for i, zip_path in enumerate(zip_files, start=1):
+        #extract case number from zip filename (e.g., "23-2-94948-1" from "23-2-94948-1.zip")
+        case_number = zip_path.stem
+        case_folder = extract_to / case_number
+        
+        print(f"[{i}/{len(zip_files)}] extracting: {zip_path.name}")
         try:
+            #create case-specific folder
+            case_folder.mkdir(parents=True, exist_ok=True)
+            
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_to)
-            print(f"extracted successfully\n")
+                zip_ref.extractall(case_folder)
+            print(f"  extracted successfully to {case_number}/\n")
+            successful += 1
         except Exception as e:
-            print(f"ERROR: {e}\n")
+            print(f"  ERROR: {e}\n")
+            failed += 1
 
-    print(f"all files extracted to: {extract_to}\n")   
+    print(f"Extraction complete")
+    print(f"  Successful: {successful}/{len(zip_files)}")
+    print(f"  Failed: {failed}/{len(zip_files)}")
+    print(f"  All files extracted to: {extract_to}\n")   
 
 #create document intelligence client
 endpoint = os.getenv("AZURE_DI_ENDPOINT")
@@ -166,9 +182,9 @@ def process_all_pdfs(root_folder, output_folder, metadata_folder):
     
     #loop through each PDF 
     for i, pdf_path in enumerate(all_pdfs, start=1):
-        case_folder = pdf_path.parent.name
+        case_number = pdf_path.parent.name
         
-        print(f"[{i}/{total_pdfs}] {case_folder}/{pdf_path.name}")
+        print(f"[{i}/{total_pdfs}] {case_number}/{pdf_path.name}")
         
         try:
             #extract text using our function
@@ -176,7 +192,7 @@ def process_all_pdfs(root_folder, output_folder, metadata_folder):
             quality_scores.append(ocr_quality_score)
             time.sleep(0.5)
             
-            #create output path preserving folder structure
+            #create output path preserving case number folder structure
             relative_path = pdf_path.relative_to(root_folder)
             output_path = output_folder / relative_path
             output_path = output_path.with_suffix(".txt")
@@ -196,7 +212,7 @@ def process_all_pdfs(root_folder, output_folder, metadata_folder):
             #save metadata
             metadata = {
                 "source_file": str(pdf_path),
-                "case_folder": case_folder,
+                "case_number": case_number,
                 "relative_path": str(relative_path),
                 "ocr_quality_score": ocr_quality_score,
                 "ocr_notes": ocr_notes
