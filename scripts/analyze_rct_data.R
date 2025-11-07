@@ -79,7 +79,7 @@ tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, flag_ta
 tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
 
 tab_flag_counts
-tab_flag_rowpc 
+tab_flag_rowpct 
 
 #print crosstabs and proportions for hearing prior to treatment vs. answer before hearing
 df_flag <- transform(
@@ -325,7 +325,7 @@ mods <- setNames(lapply(binary_case_outcomes, function(y) {
       data = data_itt_case_outcomes, family = binomial())
 }), binary_case_outcomes)
 
-# Use clustered SEs directly inside marginaleffects
+#use clustered SEs directly inside marginaleffects
 ame_tab <- imap_dfr(mods, function(m, y) {
   ame <- avg_slopes(m, variables = "household_treated_by_this_case", vcov = ~ case_no)
   tibble(outcome = y,
@@ -334,7 +334,7 @@ ame_tab <- imap_dfr(mods, function(m, y) {
          AME_hi = 100 * ame$conf.high)
 })
 
-# map from raw outcome var -> pretty label used in all_results$outcome
+#map from raw outcome var -> pretty label used in all_results$outcome
 outcome_map <- tibble(
   outcome_raw = c(
     "dismissal_final",
@@ -356,7 +356,7 @@ outcome_map <- tibble(
   )
 )
 
-# Recode AME table to the same labels, then join
+#recode AME table to the same labels, then join
 ame_tab_labeled <- ame_tab %>%
   rename(outcome_raw = outcome) %>%
   left_join(outcome_map, by = "outcome_raw") %>%
@@ -367,6 +367,38 @@ report_full_case_outcomes <- case_outcome_results %>%
 
 report_full_case_outcomes %>%
   select(-spec) %>%
+  print(n = Inf)
+
+fit_one_continuous <- function(outcome, data) {
+  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing"))
+  m   <- lm(fml, data = data)
+  
+  #align the cluster vector to the rows actually used in the model
+  mf <- model.frame(m)                              
+  idx <- as.integer(rownames(mf))                   
+  cl  <- data$household_ID[idx]                     
+  
+  V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")
+  ct  <- lmtest::coeftest(m, vcov. = V)
+  
+  est <- ct["household_treated_by_this_case", "Estimate"]
+  se  <- ct["household_treated_by_this_case", "Std. Error"]
+  tibble(
+    outcome   = outcome,
+    n         = nobs(m),
+    estimate  = est,
+    robust_se = se,
+    t_stat    = est / se,
+    p_value   = 2 * pt(-abs(est / se), df = nobs(m) - 1),
+    ci_lo     = est - 1.96 * se,
+    ci_hi     = est + 1.96 * se
+  )
+}
+
+#analyze treatment effect on monetary_judgment
+results_monetary <- fit_one_continuous("monetary_judgment", data = data_itt_case_outcomes)
+
+results_monetary %>%
   print(n = Inf)
 
 #plot ITT effects on case outcomes
@@ -381,7 +413,7 @@ label_map_case_outcomes <- c(
   rep_screened = "Screened for representation"
 )
 
-# 1) Define your base order once
+#define base order
 base_lvls <- c(
   "Writ issued", "Dismissal",
   "Order of limited dissemination issued",
@@ -424,3 +456,4 @@ results_itt_case_outcomes %>%
     plot.title = element_text(size = 12, face = "bold", hjust = 0, margin = margin(b = 12)),
     plot.margin = margin(10, 10, 10, 10)
   )
+

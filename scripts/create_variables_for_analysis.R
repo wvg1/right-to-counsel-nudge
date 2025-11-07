@@ -5,7 +5,7 @@ library(readxl)
 library(tidyverse)
 
 #read in data, double check working directory before running
-rct_data_sensitive <- read_excel("right-to-counsel-nudge/rct_data_final_sensitive.xlsx")
+rct_data_sensitive <- read_excel("rct_data_final_sensitive.xlsx")
 
 #convert appearance_date to date format
 rct_data_sensitive <- rct_data_sensitive %>%
