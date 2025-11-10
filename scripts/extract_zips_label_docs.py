@@ -79,8 +79,8 @@ def extract_and_label_zips(zip_folder, extract_to):
     print(f"  All files extracted to: {extract_to}\n")
 
 if __name__ == "__main__":
-    zip_folder = r"data/test_zips"
-    extracted_folder = r"data/test_extracted"
+    zip_folder = r"data/RCT Case documents"
+    extracted_folder = r"data/extracted documents"
 
     print("STEP 1: Extracting and labeling zip files")
     extract_and_label_zips(zip_folder, extracted_folder)

@@ -1,6 +1,4 @@
 """
-ocr_processing.py
-
 Processes PDFs extracted from case folders using Azure Document Intelligence.
 Extracted text and metadata are saved to separate folders.
 """
@@ -162,10 +160,9 @@ def process_all_pdfs(root_folder, output_folder, metadata_folder):
 
 
 if __name__ == "__main__":
-    extracted_folder = r"data/test_extracted"
-    output_folder = r"data/test_output"
-    metadata_folder = r"data/test_metadata"
+    extracted_folder = r"data/extracted documents"
+    output_folder = r"data/ocr output"
+    metadata_folder = r"data/ocr metadata"
 
     print("STEP 2: Processing PDFs with OCR")
-    print("="*70)
     process_all_pdfs(extracted_folder, output_folder, metadata_folder)
