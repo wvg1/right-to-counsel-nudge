@@ -1,3 +1,5 @@
+"This script is to rename .txt files generated during OCR processing, if necessary"
+
 from pathlib import Path
 from bs4 import BeautifulSoup
 import re
