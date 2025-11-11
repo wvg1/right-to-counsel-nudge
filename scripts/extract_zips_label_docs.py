@@ -6,9 +6,9 @@ import re
 
 def sanitize_filename(name: str) -> str:
     """Sanitize filename by replacing spaces and punctuation with underscores."""
-    # Replace spaces and punctuation with underscores
+    # replace spaces and punctuation with underscores
     name = re.sub(r'[\s\W]+', '_', name)
-    # Remove leading/trailing underscores
+    # remove leading/trailing underscores
     name = name.strip('_')
     return name.lower()
 
