@@ -27,7 +27,7 @@ def truncate_text(text, max_chars=200000):
     
     truncated = text[:max_chars] 
     
-    # Try to cut at a sentence end (find last period)
+    # try to cut at a sentence end (find last period)
     last_period = truncated.rfind('.') 
     
     if last_period > max_chars * 0.95:  
@@ -43,7 +43,7 @@ def data_from_llm(system_prompt, full_text):
     if was_truncated:
         print(f"Warning: Truncated from {len(full_text):,} to {len(processed_text):,} chars")
 
-# Initialize Azure OpenAI client with key-based authentication
+# initialize Azure OpenAI client with key-based authentication
     client = AzureOpenAI(
         azure_endpoint=endpoint,
         api_key=subscription_key,
@@ -53,7 +53,7 @@ def data_from_llm(system_prompt, full_text):
     # IMAGE_PATH = "YOUR_IMAGE_PATH"
     # encoded_image = base64.b64encode(open(IMAGE_PATH, 'rb').read()).decode('ascii')
 
-    # Prepare the chat prompt
+    # prepare the chat prompt
     chat_prompt = [
         {
             "role": "system",
@@ -75,10 +75,10 @@ def data_from_llm(system_prompt, full_text):
         
     ]
 
-    # Include speech result if speech is enabled
+    # include speech result if speech is enabled
     messages = chat_prompt
 
-    # Generate the completion
+    # generate the completion
     completion = client.chat.completions.create(
         model=deployment,
         messages=messages,
