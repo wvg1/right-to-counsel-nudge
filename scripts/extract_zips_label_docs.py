@@ -5,15 +5,19 @@ from bs4 import BeautifulSoup
 import re
 
 def sanitize_filename(name: str) -> str:
-    """Sanitize filename for Windows by replacing invalid characters with underscores."""
-    return re.sub(r'[<>:"/\\|?*]', '_', name)
+    """Sanitize filename by replacing spaces and punctuation with underscores."""
+    # Replace spaces and punctuation with underscores
+    name = re.sub(r'[\s\W]+', '_', name)
+    # Remove leading/trailing underscores
+    name = name.strip('_')
+    return name.lower()
 
 def unique_path(path: Path) -> Path:
     """If path exists, append a counter before the extension to make it unique."""
     counter = 1
     new_path = path
     while new_path.exists():
-        new_path = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+        new_path = path.with_name(f"{path.stem}{counter}{path.suffix}")
         counter += 1
     return new_path
 
@@ -62,7 +66,7 @@ def extract_and_label_zips(zip_folder, extract_to):
             for pdf_file in case_folder.glob("*.pdf"):
                 pdf_name = pdf_file.name.lower()
                 if pdf_name in pdf_mapping:
-                    new_name = f"{case_number}_{pdf_mapping[pdf_name]}.pdf".lower()
+                    new_name = f"{pdf_mapping[pdf_name]}.pdf"
                     new_path = unique_path(pdf_file.parent / new_name)
                     pdf_file.rename(new_path)
                     print(f"    Renamed: {pdf_file.name} → {new_path.name}")
