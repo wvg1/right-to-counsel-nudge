@@ -1,6 +1,6 @@
-###this script uses data_from_llm.py to document case outcomes from a variety of appearance documents in eviction cases
-###data_from_llm.py uses chatgpt (with the prompt below) to answer questions about tenant appearances using case documents
-###working directory should be the main folder of the eviction-data repo
+### script to read Azure Document Intelligence output and extract appearance data
+### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
+### working directory should be the main folder of the right-to-counsel-nudge repo
 
 #load required packages
 library(tidyverse)
@@ -16,10 +16,142 @@ pickle <- import("pickle")
 #define python file
 source_python("scripts/data_from_llm.py")
 
-#load ocr data
-ocr_final <- read_rds("data/ocr_final.rds")
+#function to read OCR output files into dataframe
+read_ocr_files <- function(text_folder, metadata_folder) {
+  text_folder <- normalizePath(text_folder)
+  metadata_folder <- normalizePath(metadata_folder)
+  
+  #get all .txt files from output folder
+  txt_files <- list.files(
+    text_folder,
+    pattern = "\\.txt$",
+    full.names = TRUE,
+    recursive = TRUE
+  )
+  
+  if (length(txt_files) == 0) {
+    warning("No .txt files found in ", text_folder)
+    return(tibble())
+  }
+  
+  #read each file and its corresponding metadata
+  ocr_data <- map_dfr(txt_files, function(txt_path) {
+    #read text content
+    text <- tryCatch(
+      read_file(txt_path),
+      error = function(e) {
+        warning(paste("Failed to read", txt_path, ":", e$message))
+        ""
+      }
+    )
+    
+    #construct corresponding metadata path
+    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
+    
+    #read metadata
+    metadata <- tryCatch(
+      fromJSON(meta_path),
+      error = function(e) {
+        warning(paste("Failed to read metadata", meta_path))
+        list(
+          source_file = txt_path,
+          case_number = NA_character_,
+          relative_path = relative_path,
+          ocr_quality_score = NA_real_,
+          ocr_notes = ""
+        )
+      }
+    )
+    
+    #extract document name from filename
+    document <- basename(txt_path) %>%
+      str_remove("\\.txt$")
+    
+    #extract directory (case folder)
+    direc <- basename(dirname(txt_path))
+    
+    tibble(
+      row_id = NA_integer_,
+      direc = direc,
+      document = document,
+      text = text,
+      source_file = metadata$source_file %||% txt_path,
+      case_number = metadata$case_number %||% NA_character_,
+      relative_path = metadata$relative_path %||% relative_path,
+      ocr_quality_score = metadata$ocr_quality_score %||% NA_real_,
+      ocr_notes = metadata$ocr_notes %||% ""
+    )
+  })
+  
+  #assign row IDs
+  ocr_data <- ocr_data %>%
+    mutate(row_id = row_number()) %>%
+    select(row_id, direc, document, text, everything())
+  
+  return(ocr_data)
+}
 
-#define prompt
+#read the OCR files
+ocr_final <- read_ocr_files(
+  text_folder = "data/ocr output",
+  metadata_folder = "data/ocr metadata"
+)
+
+cat(sprintf("Loaded %d OCR documents\n", nrow(ocr_final)))
+cat(sprintf("Average OCR quality score: %.2f\n", mean(ocr_final$ocr_quality_score, na.rm = TRUE)))
+
+#filter for appearance documents
+doc_names <- coalesce(ocr_final$document, "")
+
+doc_names_appearance <- c(
+  "appearance_pro_se",
+  "response_from_defendant",
+  "response",
+  "answer",
+  "answer1",
+  "defendant_s_answer",
+  "defendants_answer_to_complaint",
+  "defendant_s_answer_to_complaint",
+  "defendant_s_response",
+  "defendants_response",
+  "answer_defendants_answer_to_complaint",
+  "response_noa",
+  "notice_of_appearance"
+)
+
+#exclude document names containing these strings (case-insensitive)
+doc_names_appearance_excluded <- c(
+  "answer_order_fee_unlawful_detainer_received",
+  "answer_to_writ",
+  "garnishment",
+  "judgment_on_answer_of_garnishee_defendant",
+  "reply",
+  "declaration",
+  "motion",
+  "order",
+  "certificate"
+)
+
+#inclusion mask (case-insensitive)
+inc_mask <- reduce(
+  doc_names_appearance,
+  .init = rep(FALSE, nrow(ocr_final)),
+  .f = ~ .x | str_detect(doc_names, fixed(.y, ignore_case = TRUE))
+)
+
+#exclusion mask (case-insensitive)
+exc_mask <- reduce(
+  doc_names_appearance_excluded,
+  .init = rep(FALSE, nrow(ocr_final)),
+  .f = ~ .x | str_detect(doc_names, fixed(.y, ignore_case = TRUE))
+)
+
+docs_to_run_appearance <- ocr_final[inc_mask & !exc_mask, ]
+
+cat(sprintf("Found %d appearance documents to process\n", nrow(docs_to_run_appearance)))
+
+#prompt
 prompt_appearance <- 'You are an assistant that reads documents filed in Washington State unlawful detainer (eviction) cases and extracts fields.
 
 Return ONLY valid raw JSON and nothing else. No prose, no code fences.
@@ -104,7 +236,7 @@ Return only the JSON object described above.'
 #function to clean leading and trailing fences from JSON strings
 clean_fences <- function(s) gsub("^```[a-zA-Z]*\\s*|\\s*```$", "", s)
 
-#function to merge duplicate observations of the same variable: if a variable appears multiple times, combine values
+#function to merge duplicate observations of the same variable
 merge_dupe_vars <- function(x) {
   if (is.null(names(x))) return(x)
   nm <- names(x)
@@ -113,67 +245,20 @@ merge_dupe_vars <- function(x) {
   out <- list()
   for (var in unique(nm)) {
     vals <- x[nm == var]
+    #combine scalars & vectors into a single vector, dropping NULLs
     combined <- as.character(unlist(vals, use.names = FALSE))
+    #if nothing is there, keep NULL; otherwise keep unique values
     out[[var]] <- if (length(combined)) unique(combined) else NULL
   }
   out
 }
 
-#safely pull a field by name with null as default
+#safely pull a field by name with default
 pull_field <- function(x, var, default = NULL) {
   if (!is.null(x[[var]])) x[[var]] else default
 }
 
-###procedure to extract data from appearance docs ###
-#define document parameters
-doc_names <- coalesce(ocr_final$document, "")
-
-doc_names_appearance <- c(
-  "appearance_pro_se",
-  "response_from_defendant",
-  "response",
-  "answer",
-  "answer1",
-  "defendant_s_answer",
-  "defendants_answer_to_complaint",
-  "defendant_s_answer_to_complaint",
-  "defendant_s_response",
-  "defendants_response",
-  "answer_defendants_answer_to_complaint",
-  "response_noa",
-  "notice_of_appearance"
-)
-
-#exclude document names containing these strings (case-insensitive)
-doc_names_appearance_excluded <- c(
-  "answer_order_fee_unlawful_detainer_received",
-  "answer_to_writ",
-  "garnishment",
-  "judgment_on_answer_of_garnishee_defendant",
-  "reply",
-  "declaration",
-  "motion",
-  "order",
-  "certificate"
-)
-
-#inclusion mask (case-insensitive)
-inc_mask <- reduce(
-  doc_names_appearance,
-  .init = rep(FALSE, nrow(ocr_final)),
-  .f = ~ .x | str_detect(doc_names, fixed(.y, ignore_case = TRUE))
-)
-
-#exclusion mask (case-insensitive)
-exc_mask <- reduce(
-  doc_names_appearance_excluded,
-  .init = rep(FALSE, nrow(ocr_final)),
-  .f = ~ .x | str_detect(doc_names, fixed(.y, ignore_case = TRUE))
-)
-
-docs_to_run_appearance <- ocr_final[inc_mask & !exc_mask, ]
-
-#create a single tibble row for data to be pulled from appearance docs
+#convert LLM output to tibble row
 to_row_appearance <- function(x) {
   #scalars
   document_file_date <- as.character(pull_field(x, "document_file_date", NA_character_))
@@ -222,7 +307,7 @@ to_row_appearance <- function(x) {
   )
 }
 
-#function to extract data from notices of appearance using prompt_appearance
+#function to extract data from appearance docs using prompt_appearance
 parse_one <- function(txt) {
   outer <- data_from_llm(prompt_appearance, txt)
   obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
@@ -239,7 +324,7 @@ parse_one <- function(txt) {
   to_row_appearance(inner)
 }
 
-#run a test on a small subset of OCR data
+#run on test subset
 n_test <- 15
 set.seed(24)
 docs_test_appearance <- slice_sample(docs_to_run_appearance, n = min(n_test, nrow(docs_to_run_appearance)))
@@ -251,7 +336,7 @@ llm_test_appearance <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_test_appearance$row_id[.y],
              direc    = docs_test_appearance$direc[.y],
              document = docs_test_appearance$document[.y]),
       res
@@ -259,7 +344,7 @@ llm_test_appearance <- map2_dfr(
   }
 )
 
-#create dataframe containing all data from appearance docs, add source identifiers
+### run on all appearance documents, and save .rds ###
 llm_data_appearance <- map2_dfr(
   docs_to_run_appearance$text,
   seq_len(nrow(docs_to_run_appearance)),
@@ -267,7 +352,7 @@ llm_data_appearance <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_to_run_appearance$row_id[.y],
              direc    = docs_to_run_appearance$direc[.y],
              document = docs_to_run_appearance$document[.y]),
       res
@@ -275,5 +360,4 @@ llm_data_appearance <- map2_dfr(
   }
 )
 
-#save data
 saveRDS(llm_data_appearance, "data/llm_data_appearance.rds")

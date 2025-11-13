@@ -1,6 +1,6 @@
-###this script uses data_from_llm.py to document case outcomes from a variety of hearing minute documents in eviction cases
-###data_from_llm.py uses chatgpt (with the prompt below) to answer questions about hearings using case documents
-###working directory should be the main folder of the eviction-data repo
+### script to read Azure Document Intelligence output and extract hearing minute data
+### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
+### working directory should be the main folder of the right-to-counsel-nudge repo
 
 #load required packages
 library(tidyverse)
@@ -16,10 +16,97 @@ pickle <- import("pickle")
 #define python file
 source_python("scripts/data_from_llm.py")
 
-#load ocr data
-ocr_final <- read_rds("data/ocr_final.rds")
+#function to read OCR output files into dataframe
+read_ocr_files <- function(text_folder, metadata_folder) {
+  text_folder <- normalizePath(text_folder)
+  metadata_folder <- normalizePath(metadata_folder)
+  
+  #get all .txt files from output folder
+  txt_files <- list.files(
+    text_folder,
+    pattern = "\\.txt$",
+    full.names = TRUE,
+    recursive = TRUE
+  )
+  
+  if (length(txt_files) == 0) {
+    warning("No .txt files found in ", text_folder)
+    return(tibble())
+  }
+  
+  #read each file and its corresponding metadata
+  ocr_data <- map_dfr(txt_files, function(txt_path) {
+    #read text content
+    text <- tryCatch(
+      read_file(txt_path),
+      error = function(e) {
+        warning(paste("Failed to read", txt_path, ":", e$message))
+        ""
+      }
+    )
+    
+    #construct corresponding metadata path
+    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
+    
+    #read metadata
+    metadata <- tryCatch(
+      fromJSON(meta_path),
+      error = function(e) {
+        warning(paste("Failed to read metadata", meta_path))
+        list(
+          source_file = txt_path,
+          case_number = NA_character_,
+          relative_path = relative_path,
+          ocr_quality_score = NA_real_,
+          ocr_notes = ""
+        )
+      }
+    )
+    
+    #extract document name from filename
+    document <- basename(txt_path) %>%
+      str_remove("\\.txt$")
+    
+    #extract directory (case folder)
+    direc <- basename(dirname(txt_path))
+    
+    tibble(
+      row_id = NA_integer_,
+      direc = direc,
+      document = document,
+      text = text,
+      source_file = metadata$source_file %||% txt_path,
+      case_number = metadata$case_number %||% NA_character_,
+      relative_path = metadata$relative_path %||% relative_path,
+      ocr_quality_score = metadata$ocr_quality_score %||% NA_real_,
+      ocr_notes = metadata$ocr_notes %||% ""
+    )
+  })
+  
+  #assign row IDs
+  ocr_data <- ocr_data %>%
+    mutate(row_id = row_number()) %>%
+    select(row_id, direc, document, text, everything())
+  
+  return(ocr_data)
+}
 
-#define prompt
+#read the OCR files
+ocr_final <- read_ocr_files(
+  text_folder = "data/ocr output",
+  metadata_folder = "data/ocr metadata"
+)
+
+cat(sprintf("Loaded %d OCR documents\n", nrow(ocr_final)))
+cat(sprintf("Average OCR quality score: %.2f\n", mean(ocr_final$ocr_quality_score, na.rm = TRUE)))
+
+#filter for minute entry documents
+docs_to_run_minute_entry <- ocr_final[grepl("minute", ocr_final$document, ignore.case = TRUE), ]
+
+cat(sprintf("Found %d minute entry documents to process\n", nrow(docs_to_run_minute_entry)))
+
+#prompt
 prompt_minute_entry <- 'You are an assistant that reads Washington State unlawful detainer (eviction) hearing minutes and extracts fields.
 
 Return ONLY valid raw JSON and nothing else. No prose, no code fences.
@@ -99,7 +186,7 @@ Return only the JSON object described above.
 #function to clean leading and trailing fences from JSON strings
 clean_fences <- function(s) gsub("^```[a-zA-Z]*\\s*|\\s*```$", "", s)
 
-#function to merge duplicate observations of the same variable: if a variable appears multiple times, combine values
+#function to merge duplicate observations of the same variable
 merge_dupe_vars <- function(x) {
   if (is.null(names(x))) return(x)
   nm <- names(x)
@@ -121,11 +208,7 @@ pull_field <- function(x, var, default = NULL) {
   if (!is.null(x[[var]])) x[[var]] else default
 }
 
-###procedure to extract data from minute entry docs ###
-#define document parameters (minute entry)
-docs_to_run_minute_entry <- ocr_final[grepl("minute", ocr_final$document, ignore.case = TRUE),]
-
-#create a single tibble row for data to be pulled from minute entry docs
+#convert LLM output to tibble row
 to_row_minute_entry <- function(x) {
   #scalars
   hearing_date <- as.character(pull_field(x, "hearing_date", NA_character_))
@@ -177,6 +260,7 @@ to_row_minute_entry <- function(x) {
     conf_defendant_attorneys_at_hearing = conf_dah
   )
 }
+
 #function to extract data from minute entry docs using prompt_minute_entry
 parse_one <- function(txt) {
   outer <- data_from_llm(prompt_minute_entry, txt)
@@ -187,7 +271,6 @@ parse_one <- function(txt) {
   raw <- trimws(clean_fences(raw))
   if (!validate(raw)) return(NULL)
   
-  # parse inner JSON to a *list* (not auto-simplified), then merge dupes
   inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
   if (is.null(inner)) return(NULL)
   
@@ -195,7 +278,7 @@ parse_one <- function(txt) {
   to_row_minute_entry(inner)
 }
 
-### run a test on a small subset of OCR data ###
+#run on test subset
 n_test <- 15
 set.seed(198)
 docs_test_minute_entry <- slice_sample(docs_to_run_minute_entry, n = min(n_test, nrow(docs_to_run_minute_entry)))
@@ -207,7 +290,7 @@ llm_test_minute_entry <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_test_minute_entry$row_id[.y],
              direc    = docs_test_minute_entry$direc[.y],
              document = docs_test_minute_entry$document[.y]),
       res
@@ -215,7 +298,7 @@ llm_test_minute_entry <- map2_dfr(
   }
 )
 
-#create dataframe containing all data from minute entry documents, add source identifiers
+### run on all minute entry documents, and save .rds ###
 llm_data_minute_entry <- map2_dfr(
   docs_to_run_minute_entry$text,
   seq_len(nrow(docs_to_run_minute_entry)),
@@ -223,7 +306,7 @@ llm_data_minute_entry <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_to_run_minute_entry$row_id[.y],
              direc    = docs_to_run_minute_entry$direc[.y],
              document = docs_to_run_minute_entry$document[.y]),
       res
@@ -231,5 +314,4 @@ llm_data_minute_entry <- map2_dfr(
   }
 )
 
-#save data
 saveRDS(llm_data_minute_entry, "data/llm_data_minute_entry.rds")

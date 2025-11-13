@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import re
 
 def sanitize_filename(name: str) -> str:
-    """Sanitize filename by replacing spaces and punctuation with underscores."""
+    """Sanitize filename by replacing spaces and punctuation with underscores"""
     # replace spaces and punctuation with underscores
     name = re.sub(r'[\s\W]+', '_', name)
     # remove leading/trailing underscores
@@ -13,7 +13,7 @@ def sanitize_filename(name: str) -> str:
     return name.lower()
 
 def unique_path(path: Path) -> Path:
-    """If path exists, append a counter before the extension to make it unique."""
+    """If path exists, append a counter before the extension to make it unique"""
     counter = 1
     new_path = path
     while new_path.exists():
@@ -40,14 +40,14 @@ def extract_and_label_zips(zip_folder, extract_to):
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 case_number = zip_path.stem
-                case_folder = extract_to / case_number
-                case_folder.mkdir(parents=True, exist_ok=True)
-                zip_ref.extractall(case_folder)
-                print(f"  Extracted to {case_folder}")
+                temp_case_folder = extract_to / case_number
+                temp_case_folder.mkdir(parents=True, exist_ok=True)
+                zip_ref.extractall(temp_case_folder)
+                print(f"  Extracted to {temp_case_folder}")
 
-            html_files = list(case_folder.glob("*.htm")) + list(case_folder.glob("*.html"))
+            html_files = list(temp_case_folder.glob("*.htm")) + list(temp_case_folder.glob("*.html"))
             if not html_files:
-                print(f"  No HTML file found in {case_folder}, skipping renaming PDFs.")
+                print(f"  No HTML file found in {temp_case_folder}, skipping renaming PDFs.")
                 continue
             html_file = html_files[0]
 
@@ -62,14 +62,20 @@ def extract_and_label_zips(zip_folder, extract_to):
                     doc_name = a_tag.get_text(strip=True).replace('\xa0', ' ')
                     pdf_mapping[Path(href).name.lower()] = sanitize_filename(doc_name)
 
-            # rename PDFs
-            for pdf_file in case_folder.glob("*.pdf"):
+            # move and rename PDFs to extract_to root (not in case folder)
+            for pdf_file in temp_case_folder.glob("*.pdf"):
                 pdf_name = pdf_file.name.lower()
                 if pdf_name in pdf_mapping:
                     new_name = f"{pdf_mapping[pdf_name]}.pdf"
-                    new_path = unique_path(pdf_file.parent / new_name)
+                    new_path = unique_path(extract_to / new_name)
                     pdf_file.rename(new_path)
-                    print(f"    Renamed: {pdf_file.name} → {new_path.name}")
+                    print(f"    Moved & renamed: {pdf_file.name} → {new_path.name}")
+
+            # clean up temp case folder
+            if temp_case_folder.exists():
+                import shutil
+                shutil.rmtree(temp_case_folder)
+                print(f"  Cleaned up temp folder: {temp_case_folder}")
 
             successful += 1
 

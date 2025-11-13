@@ -1,8 +1,8 @@
-###this script uses data_from_llm.py to document case characteristics from a variety of complaint documents in eviction cases
-###data_from_llm.py uses chatgpt (with the prompt below) to answer questions about cases using complaint documents
-###working directory should be the main folder of the eviction-data repo
+###script to read Azure Document Intelligence output and extract complaint data
+###reads .txt files from data/ocr output and .json metadata from data/ocr metadata
+###working directory should be the main folder of the right-to-counsel-nudge repo
 
-#load required packages
+#load packages
 library(tidyverse)
 library(reticulate)
 library(jsonlite)
@@ -16,10 +16,99 @@ pickle <- import("pickle")
 #define python file
 source_python("scripts/data_from_llm.py")
 
-#read in OCR data
-ocr_final <- read_rds("data/ocr_final.rds")
+#function to read OCR output files into dataframe
+read_ocr_files <- function(text_folder, metadata_folder) {
+  text_folder <- normalizePath(text_folder)
+  metadata_folder <- normalizePath(metadata_folder)
+  
+  #get all .txt files from output folder
+  txt_files <- list.files(
+    text_folder,
+    pattern = "\\.txt$",
+    full.names = TRUE,
+    recursive = TRUE
+  )
+  
+  if (length(txt_files) == 0) {
+    warning("No .txt files found in ", text_folder)
+    return(tibble())
+  }
+  
+  #read each file and its corresponding metadata
+  ocr_data <- map_dfr(txt_files, function(txt_path) {
+    # Read text content
+    text <- tryCatch(
+      read_file(txt_path),
+      error = function(e) {
+        warning(paste("Failed to read", txt_path, ":", e$message))
+        ""
+      }
+    )
+    
+    #construct corresponding metadata path
+    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
+    
+    #read metadata
+    metadata <- tryCatch(
+      fromJSON(meta_path),
+      error = function(e) {
+        warning(paste("Failed to read metadata", meta_path))
+        list(
+          source_file = txt_path,
+          case_number = NA_character_,
+          relative_path = relative_path,
+          ocr_quality_score = NA_real_,
+          ocr_notes = ""
+        )
+      }
+    )
+    
+    #extract document name from filename
+    document <- basename(txt_path) %>%
+      str_remove("\\.txt$")
+    
+    #extract directory (case folder) - may be empty if flat structure
+    direc <- basename(dirname(txt_path))
+    if (direc == basename(text_folder)) direc <- ""
+    
+    tibble(
+      row_id = NA_integer_,
+      direc = direc,
+      document = document,
+      text = text,
+      source_file = metadata$source_file %||% txt_path,
+      case_number = metadata$case_number %||% NA_character_,
+      relative_path = metadata$relative_path %||% relative_path,
+      ocr_quality_score = metadata$ocr_quality_score %||% NA_real_,
+      ocr_notes = metadata$ocr_notes %||% ""
+    )
+  })
+  
+  #assign row IDs
+  ocr_data <- ocr_data %>%
+    mutate(row_id = row_number()) %>%
+    select(row_id, direc, document, text, everything())
+  
+  return(ocr_data)
+}
 
-#define prompt
+#read the OCR files
+ocr_final <- read_ocr_files(
+  text_folder = "data/ocr output",
+  metadata_folder = "data/ocr metadata"
+)
+
+cat(sprintf("Loaded %d OCR documents\n", nrow(ocr_final)))
+cat(sprintf("Average OCR quality score: %.2f\n", mean(ocr_final$ocr_quality_score, na.rm = TRUE)))
+
+#filter for complaint documents
+docs_to_run_complaint <- ocr_final[grepl("complaint", ocr_final$document, ignore.case = TRUE), ]
+
+cat(sprintf("Found %d complaint documents to process\n", nrow(docs_to_run_complaint)))
+
+#prompt
+
 prompt_complaint <- 'You are an assistant that reads Washington State unlawful detainer (eviction) complaint documents and extracts fields.
 
 Return ONLY valid raw JSON and nothing else. No prose, no code fences.
@@ -104,7 +193,7 @@ Return only JSON objects following this schema.
 #function to clean leading and trailing fences from JSON strings
 clean_fences <- function(s) gsub("^```[a-zA-Z]*\\s*|\\s*```$", "", s)
 
-#function to merge duplicate observations of the same variable: if a variable appears multiple times, combine values
+#function to merge duplicate observations of the same variable
 merge_dupe_vars <- function(x) {
   if (is.null(names(x))) return(x)
   nm <- names(x)
@@ -126,22 +215,18 @@ pull_field <- function(x, var, default = NULL) {
   if (!is.null(x[[var]])) x[[var]] else default
 }
 
-###procedure to extract data from complaints ###
-#define document parameters (complaint)
-docs_to_run_complaint <- ocr_final[grepl("complaint", ocr_final$document, ignore.case = TRUE),]
-
-#create a single tibble row for data to be pulled from complaints
+#convert LLM output to tibble row
 to_row_complaint <- function(x) {
   #scalars
   case_number <- as.character(pull_field(x, "case_number", NA_character_))
-  address     <- as.character(pull_field(x, "address", NA_character_))
+  address <- as.character(pull_field(x, "address", NA_character_))
   address_street <- as.character(pull_field(x, "address_street", NA_character_))
-  address_unit   <- as.character(pull_field(x, "address_unit", NA_character_))
-  address_city   <- as.character(pull_field(x, "address_city", NA_character_))
-  address_state  <- as.character(pull_field(x, "address_state", NA_character_))
-  address_zip   <- as.character(pull_field(x, "address_zip", NA_character_))
-  case_type   <- as.character(pull_field(x, "case_type", NA_character_))
-  rent_owed   <- as.character(pull_field(x, "rent_owed", NA_character_))
+  address_unit <- as.character(pull_field(x, "address_unit", NA_character_))
+  address_city <- as.character(pull_field(x, "address_city", NA_character_))
+  address_state <- as.character(pull_field(x, "address_state", NA_character_))
+  address_zip <- as.character(pull_field(x, "address_zip", NA_character_))
+  case_type <- as.character(pull_field(x, "case_type", NA_character_))
+  rent_owed <- as.character(pull_field(x, "rent_owed", NA_character_))
   
   #arrays (ensure character vector, even if scalar was returned)
   pn <- as.character(unlist(pull_field(x, "plaintiff_names", character()), use.names = FALSE))
@@ -187,11 +272,11 @@ to_row_complaint <- function(x) {
     conf_rent_owed = conf_rent_owed,
     conf_plaintiff_names = conf_pn,
     conf_plaintiff_attorneys = conf_pa,
-    conf_defendant_names = conf_dn,
+    conf_defendant_names = conf_dn
   )
 }
 
-#function to extract data from complaints using prompt_complaint
+# Function to extract data from complaints using prompt_complaint
 parse_one <- function(txt) {
   outer <- data_from_llm(prompt_complaint, txt)
   obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
@@ -201,7 +286,6 @@ parse_one <- function(txt) {
   raw <- trimws(clean_fences(raw))
   if (!validate(raw)) return(NULL)
   
-  # parse inner JSON to a *list* (not auto-simplified), then merge dupes
   inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
   if (is.null(inner)) return(NULL)
   
@@ -209,7 +293,8 @@ parse_one <- function(txt) {
   to_row_complaint(inner)
 }
 
-### run a test on a small subset of OCR data ###
+### run on test subset ###
+
 n_test <- 10
 set.seed(79)
 docs_test_complaint <- slice_sample(docs_to_run_complaint, n = min(n_test, nrow(docs_to_run_complaint)))
@@ -221,7 +306,7 @@ llm_test_complaint <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_test_complaint$row_id[.y],
              direc    = docs_test_complaint$direc[.y],
              document = docs_test_complaint$document[.y]),
       res
@@ -229,7 +314,8 @@ llm_test_complaint <- map2_dfr(
   }
 )
 
-#create dataframe containing all data from complaint documents, add source identifiers
+### run on all complaint documents ###
+
 llm_data_complaint <- map2_dfr(
   docs_to_run_complaint$text,
   seq_len(nrow(docs_to_run_complaint)),
@@ -237,7 +323,7 @@ llm_data_complaint <- map2_dfr(
     res <- parse_one(.x)
     if (is.null(res)) tibble()
     else bind_cols(
-      tibble(row_id = .y,
+      tibble(row_id = docs_to_run_complaint$row_id[.y],
              direc    = docs_to_run_complaint$direc[.y],
              document = docs_to_run_complaint$document[.y]),
       res
@@ -245,5 +331,4 @@ llm_data_complaint <- map2_dfr(
   }
 )
 
-#save data
 saveRDS(llm_data_complaint, "data/llm_data_complaint.rds")
