@@ -21,12 +21,8 @@ py_config()
 py <- import_builtins()
 pickle <- import("pickle")
 
-#define python file
-python_script <- file.path("scripts", "data_from_llm.py")
-if (!file.exists(python_script)) {
-  stop("Python script not found at: ", python_script)
-}
-source_python(python_script)
+#define python script
+source_python(scripts/data_from_llm.py)
 
 #simple JSON validator
 validate <- function(json_str) {
@@ -344,7 +340,6 @@ n_test <- 15
 set.seed(2666)
 docs_test_agreement <- slice_sample(docs_to_run_agreement, n = min(n_test, nrow(docs_to_run_agreement)))
 
-cat("\nProcessing test subset...\n")
 llm_test_agreement <- map2_dfr(
   docs_test_agreement$text,
   seq_len(nrow(docs_test_agreement)),
@@ -366,7 +361,6 @@ cat(sprintf("Successfully processed %d/%d test documents\n",
             nrow(llm_test_agreement), nrow(docs_test_agreement)))
 
 ### run on all agreement documents, and save .rds ###
-cat("\nProcessing all agreement documents...\n")
 llm_data_agreement <- map2_dfr(
   docs_to_run_agreement$text,
   seq_len(nrow(docs_to_run_agreement)),

@@ -2,19 +2,41 @@
 ### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
 ### working directory should be the main folder of the right-to-counsel-nudge repo
 
+#set Python path
+Sys.setenv(RETICULATE_PYTHON = file.path(getwd(), ".venv", "Scripts", "python.exe"))
+
 #load required packages
 library(tidyverse)
 library(reticulate)
 library(jsonlite)
 
 #load virtual environment and python
-use_virtualenv("/Users/wvg1/Documents/eviction-data/.venv", required = TRUE)
+venv_path <- file.path(getwd(), ".venv")
+if (!dir.exists(venv_path)) {
+  stop("Virtual environment not found at: ", venv_path, 
+       "\nPlease ensure .venv exists in the current working directory.")
+}
+use_virtualenv(venv_path, required = TRUE)
 py_config()
 py <- import_builtins()
 pickle <- import("pickle")
 
 #define python file
-source_python("scripts/data_from_llm.py")
+python_script <- file.path("scripts", "data_from_llm.py")
+if (!file.exists(python_script)) {
+  stop("Python script not found at: ", python_script)
+}
+source_python(python_script)
+
+#simple JSON validator
+validate <- function(json_str) {
+  tryCatch({
+    fromJSON(json_str)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
 
 #function to read OCR output files into dataframe
 read_ocr_files <- function(text_folder, metadata_folder) {
@@ -46,7 +68,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     )
     
     #construct corresponding metadata path
-    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    relative_path <- sub(paste0("^", gsub("\\\\", "/", normalizePath(text_folder)), "/?"), "", gsub("\\\\", "/", txt_path))
     meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
     
     #read metadata
@@ -308,20 +330,42 @@ to_row_appearance <- function(x) {
 }
 
 #function to extract data from appearance docs using prompt_appearance
-parse_one <- function(txt) {
-  outer <- data_from_llm(prompt_appearance, txt)
-  obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) return(NULL)
+parse_one <- function(txt, doc_id = NULL) {
+  result <- tryCatch({
+    outer <- data_from_llm(prompt_appearance, txt)
+    obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
+    
+    if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Invalid response structure from LLM")
+      return(NULL)
+    }
+    
+    raw <- obj$choices[[1]]$message$content
+    raw <- trimws(clean_fences(raw))
+    
+    if (!validate(raw)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "LLM returned invalid JSON")
+      return(NULL)
+    }
+    
+    inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(inner)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Failed to parse inner JSON")
+      return(NULL)
+    }
+    
+    inner <- merge_dupe_vars(inner)
+    to_row_appearance(inner)
+  }, error = function(e) {
+    warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+            "Error in parse_one: ", e$message)
+    return(NULL)
+  })
   
-  raw <- obj$choices[[1]]$message$content
-  raw <- trimws(clean_fences(raw))
-  if (!validate(raw)) return(NULL)
-  
-  inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(inner)) return(NULL)
-  
-  inner <- merge_dupe_vars(inner)
-  to_row_appearance(inner)
+  return(result)
 }
 
 #run on test subset
@@ -329,11 +373,13 @@ n_test <- 15
 set.seed(24)
 docs_test_appearance <- slice_sample(docs_to_run_appearance, n = min(n_test, nrow(docs_to_run_appearance)))
 
+cat("\nProcessing test subset...\n")
 llm_test_appearance <- map2_dfr(
   docs_test_appearance$text,
   seq_len(nrow(docs_test_appearance)),
   ~{
-    res <- parse_one(.x)
+    cat(sprintf("Processing test document %d/%d\r", .y, nrow(docs_test_appearance)))
+    res <- parse_one(.x, doc_id = docs_test_appearance$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_test_appearance$row_id[.y],
@@ -343,13 +389,23 @@ llm_test_appearance <- map2_dfr(
     )
   }
 )
+cat("\n")
+
+cat(sprintf("Successfully processed %d/%d test documents\n", 
+            nrow(llm_test_appearance), nrow(docs_test_appearance)))
 
 ### run on all appearance documents, and save .rds ###
+cat("\nProcessing all appearance documents...\n")
 llm_data_appearance <- map2_dfr(
   docs_to_run_appearance$text,
   seq_len(nrow(docs_to_run_appearance)),
   ~{
-    res <- parse_one(.x)
+    if (.y %% 10 == 0) {
+      cat(sprintf("Processing document %d/%d (%.1f%%)\n", 
+                  .y, nrow(docs_to_run_appearance), 
+                  100 * .y / nrow(docs_to_run_appearance)))
+    }
+    res <- parse_one(.x, doc_id = docs_to_run_appearance$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_to_run_appearance$row_id[.y],
@@ -360,4 +416,8 @@ llm_data_appearance <- map2_dfr(
   }
 )
 
+cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
+            nrow(llm_data_appearance), nrow(docs_to_run_appearance)))
+
 saveRDS(llm_data_appearance, "data/llm_data_appearance.rds")
+cat("Data saved to data/llm_data_appearance.rds\n")
