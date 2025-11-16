@@ -65,7 +65,8 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     )
     
     #construct corresponding metadata path
-    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    # Extract just the relative path from text_folder
+    relative_path <- sub(paste0("^", gsub("\\\\", "/", normalizePath(text_folder)), "/?"), "", gsub("\\\\", "/", txt_path))
     meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
     
     #read metadata
