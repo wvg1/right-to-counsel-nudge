@@ -2,6 +2,9 @@
 ### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
 ### working directory should be the main folder of the eviction-data repo
 
+#set Python path
+Sys.setenv(RETICULATE_PYTHON = file.path(getwd(), ".venv", "Scripts", "python.exe"))
+
 #load required packages
 library(tidyverse)
 library(reticulate)
