@@ -8,13 +8,32 @@ library(reticulate)
 library(jsonlite)
 
 #load virtual environment and python
-use_virtualenv("/Users/wvg1/Documents/eviction-data/.venv", required = TRUE)
+venv_path <- file.path(getwd(), ".venv")
+if (!dir.exists(venv_path)) {
+  stop("Virtual environment not found at: ", venv_path, 
+       "\nPlease ensure .venv exists in the current working directory.")
+}
+use_virtualenv(venv_path, required = TRUE)
 py_config()
 py <- import_builtins()
 pickle <- import("pickle")
 
 #define python file
-source_python("scripts/data_from_llm.py")
+python_script <- file.path("scripts", "data_from_llm.py")
+if (!file.exists(python_script)) {
+  stop("Python script not found at: ", python_script)
+}
+source_python(python_script)
+
+#simple JSON validator
+validate <- function(json_str) {
+  tryCatch({
+    fromJSON(json_str)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
 
 #function to read OCR output files into dataframe
 read_ocr_files <- function(text_folder, metadata_folder) {
@@ -233,7 +252,6 @@ pull_field <- function(x, var, default = NULL) {
 }
 
 #convert LLM output to tibble row
-
 to_row_agreement <- function(x) {
   #scalars
   document_file_date <- as.character(pull_field(x, "document_file_date", NA_character_))
@@ -279,20 +297,42 @@ to_row_agreement <- function(x) {
 }
 
 #function to extract data from agreement docs using prompt_agreement
-parse_one <- function(txt) {
-  outer <- data_from_llm(prompt_agreement, txt)
-  obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) return(NULL)
+parse_one <- function(txt, doc_id = NULL) {
+  result <- tryCatch({
+    outer <- data_from_llm(prompt_agreement, txt)
+    obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
+    
+    if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Invalid response structure from LLM")
+      return(NULL)
+    }
+    
+    raw <- obj$choices[[1]]$message$content
+    raw <- trimws(clean_fences(raw))
+    
+    if (!validate(raw)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "LLM returned invalid JSON")
+      return(NULL)
+    }
+    
+    inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(inner)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Failed to parse inner JSON")
+      return(NULL)
+    }
+    
+    inner <- merge_dupe_vars(inner)
+    to_row_agreement(inner)
+  }, error = function(e) {
+    warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+            "Error in parse_one: ", e$message)
+    return(NULL)
+  })
   
-  raw <- obj$choices[[1]]$message$content
-  raw <- trimws(clean_fences(raw))
-  if (!validate(raw)) return(NULL)
-  
-  inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(inner)) return(NULL)
-  
-  inner <- merge_dupe_vars(inner)
-  to_row_agreement(inner)
+  return(result)
 }
 
 ###run on test subset ###
@@ -300,11 +340,13 @@ n_test <- 15
 set.seed(2666)
 docs_test_agreement <- slice_sample(docs_to_run_agreement, n = min(n_test, nrow(docs_to_run_agreement)))
 
+cat("\nProcessing test subset...\n")
 llm_test_agreement <- map2_dfr(
   docs_test_agreement$text,
   seq_len(nrow(docs_test_agreement)),
   ~{
-    res <- parse_one(.x)
+    cat(sprintf("Processing test document %d/%d\r", .y, nrow(docs_test_agreement)))
+    res <- parse_one(.x, doc_id = docs_test_agreement$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_test_agreement$row_id[.y],
@@ -314,13 +356,23 @@ llm_test_agreement <- map2_dfr(
     )
   }
 )
+cat("\n")
+
+cat(sprintf("Successfully processed %d/%d test documents\n", 
+            nrow(llm_test_agreement), nrow(docs_test_agreement)))
 
 ### run on all agreement documents, and save .rds ###
+cat("\nProcessing all agreement documents...\n")
 llm_data_agreement <- map2_dfr(
   docs_to_run_agreement$text,
   seq_len(nrow(docs_to_run_agreement)),
   ~{
-    res <- parse_one(.x)
+    if (.y %% 10 == 0) {
+      cat(sprintf("Processing document %d/%d (%.1f%%)\n", 
+                  .y, nrow(docs_to_run_agreement), 
+                  100 * .y / nrow(docs_to_run_agreement)))
+    }
+    res <- parse_one(.x, doc_id = docs_to_run_agreement$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_to_run_agreement$row_id[.y],
@@ -330,5 +382,8 @@ llm_data_agreement <- map2_dfr(
     )
   }
 )
+
+cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
+            nrow(llm_data_agreement), nrow(docs_to_run_agreement)))
 
 saveRDS(llm_data_agreement, "data/llm_data_agreement.rds")
