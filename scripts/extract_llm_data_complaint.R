@@ -2,16 +2,37 @@
 ###reads .txt files from data/ocr output and .json metadata from data/ocr metadata
 ###working directory should be the main folder of the right-to-counsel-nudge repo
 
-#load packages
+#set Python path
+Sys.setenv(RETICULATE_PYTHON = file.path(getwd(), ".venv", "Scripts", "python.exe"))
+
+#load required packages
 library(tidyverse)
 library(reticulate)
 library(jsonlite)
 
 #load virtual environment and python
-use_virtualenv("/Users/wvg1/Documents/eviction-data/.venv", required = TRUE)
+venv_path <- file.path(getwd(), ".venv")
+if (!dir.exists(venv_path)) {
+  stop("Virtual environment not found at: ", venv_path, 
+       "\nPlease ensure .venv exists in the current working directory.")
+}
+use_virtualenv(venv_path, required = TRUE)
 py_config()
 py <- import_builtins()
 pickle <- import("pickle")
+
+#define python file
+source_python("scripts/data_from_llm.py")
+
+#simple JSON validator
+validate <- function(json_str) {
+  tryCatch({
+    fromJSON(json_str)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
 
 #define python file
 source_python("scripts/data_from_llm.py")
@@ -36,7 +57,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
   
   #read each file and its corresponding metadata
   ocr_data <- map_dfr(txt_files, function(txt_path) {
-    # Read text content
+    #read text content
     text <- tryCatch(
       read_file(txt_path),
       error = function(e) {
@@ -46,7 +67,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     )
     
     #construct corresponding metadata path
-    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    relative_path <- sub(paste0("^", gsub("\\\\", "/", normalizePath(text_folder)), "/?"), "", gsub("\\\\", "/", txt_path))
     meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
     
     #read metadata
@@ -68,9 +89,8 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     document <- basename(txt_path) %>%
       str_remove("\\.txt$")
     
-    #extract directory (case folder) - may be empty if flat structure
+    #extract directory (case folder)
     direc <- basename(dirname(txt_path))
-    if (direc == basename(text_folder)) direc <- ""
     
     tibble(
       row_id = NA_integer_,
@@ -276,34 +296,56 @@ to_row_complaint <- function(x) {
   )
 }
 
-# Function to extract data from complaints using prompt_complaint
-parse_one <- function(txt) {
-  outer <- data_from_llm(prompt_complaint, txt)
-  obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) return(NULL)
+#function to extract data from complaint docs using prompt_complaint
+parse_one <- function(txt, doc_id = NULL) {
+  result <- tryCatch({
+    outer <- data_from_llm(prompt_complaint, txt)
+    obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
+    
+    if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Invalid response structure from LLM")
+      return(NULL)
+    }
+    
+    raw <- obj$choices[[1]]$message$content
+    raw <- trimws(clean_fences(raw))
+    
+    if (!validate(raw)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "LLM returned invalid JSON")
+      return(NULL)
+    }
+    
+    inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(inner)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Failed to parse inner JSON")
+      return(NULL)
+    }
+    
+    inner <- merge_dupe_vars(inner)
+    to_row_complaint(inner)
+  }, error = function(e) {
+    warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+            "Error in parse_one: ", e$message)
+    return(NULL)
+  })
   
-  raw <- obj$choices[[1]]$message$content
-  raw <- trimws(clean_fences(raw))
-  if (!validate(raw)) return(NULL)
-  
-  inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(inner)) return(NULL)
-  
-  inner <- merge_dupe_vars(inner)
-  to_row_complaint(inner)
+  return(result)
 }
 
-### run on test subset ###
-
-n_test <- 10
-set.seed(79)
+#run on test subset
+n_test <- 15
+set.seed(24)
 docs_test_complaint <- slice_sample(docs_to_run_complaint, n = min(n_test, nrow(docs_to_run_complaint)))
 
 llm_test_complaint <- map2_dfr(
   docs_test_complaint$text,
   seq_len(nrow(docs_test_complaint)),
   ~{
-    res <- parse_one(.x)
+    cat(sprintf("Processing test document %d/%d\r", .y, nrow(docs_test_complaint)))
+    res <- parse_one(.x, doc_id = docs_test_complaint$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_test_complaint$row_id[.y],
@@ -313,14 +355,24 @@ llm_test_complaint <- map2_dfr(
     )
   }
 )
+cat("\n")
 
-### run on all complaint documents ###
+cat(sprintf("Successfully processed %d/%d test documents\n", 
+            nrow(llm_test_complaint), nrow(docs_test_complaint)))
 
+### run on all complaint documents, and save .rds ###
+
+cat("\nProcessing all complaint documents...\n")
 llm_data_complaint <- map2_dfr(
   docs_to_run_complaint$text,
   seq_len(nrow(docs_to_run_complaint)),
   ~{
-    res <- parse_one(.x)
+    if (.y %% 10 == 0) {
+      cat(sprintf("Processing document %d/%d (%.1f%%)\n", 
+                  .y, nrow(docs_to_run_complaint), 
+                  100 * .y / nrow(docs_to_run_complaint)))
+    }
+    res <- parse_one(.x, doc_id = docs_to_run_complaint$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_to_run_complaint$row_id[.y],
@@ -330,5 +382,8 @@ llm_data_complaint <- map2_dfr(
     )
   }
 )
+
+cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
+            nrow(llm_data_complaint), nrow(docs_to_run_complaint)))
 
 saveRDS(llm_data_complaint, "data/llm_data_complaint.rds")

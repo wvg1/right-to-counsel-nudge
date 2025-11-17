@@ -22,11 +22,7 @@ py <- import_builtins()
 pickle <- import("pickle")
 
 #define python file
-python_script <- file.path("scripts", "data_from_llm.py")
-if (!file.exists(python_script)) {
-  stop("Python script not found at: ", python_script)
-}
-source_python(python_script)
+source_python("scripts/data_from_llm.py")
 
 #simple JSON validator
 validate <- function(json_str) {
