@@ -2,19 +2,37 @@
 ### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
 ### working directory should be the main folder of the right-to-counsel-nudge repo
 
+#set Python path
+Sys.setenv(RETICULATE_PYTHON = file.path(getwd(), ".venv", "Scripts", "python.exe"))
+
 #load required packages
 library(tidyverse)
 library(reticulate)
 library(jsonlite)
 
 #load virtual environment and python
-use_virtualenv("/Users/wvg1/Documents/eviction-data/.venv", required = TRUE)
+venv_path <- file.path(getwd(), ".venv")
+if (!dir.exists(venv_path)) {
+  stop("Virtual environment not found at: ", venv_path, 
+       "\nPlease ensure .venv exists in the current working directory.")
+}
+use_virtualenv(venv_path, required = TRUE)
 py_config()
 py <- import_builtins()
 pickle <- import("pickle")
 
 #define python file
 source_python("scripts/data_from_llm.py")
+
+#simple JSON validator
+validate <- function(json_str) {
+  tryCatch({
+    fromJSON(json_str)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
 
 #function to read OCR output files into dataframe
 read_ocr_files <- function(text_folder, metadata_folder) {
@@ -46,7 +64,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     )
     
     #construct corresponding metadata path
-    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    relative_path <- sub(paste0("^", gsub("\\\\", "/", normalizePath(text_folder)), "/?"), "", gsub("\\\\", "/", txt_path))
     meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
     
     #read metadata
@@ -137,8 +155,7 @@ docs_to_run_summons <- ocr_final[inc_mask & !exc_mask, ]
 cat(sprintf("Found %d summons documents to process\n", nrow(docs_to_run_summons)))
 
 #prompt
-prompt_summons <- '
-You are an assistant that reads Washington State unlawful-detainer (eviction) summons documents and extracts fields.
+prompt_summons <- 'You are an assistant that reads Washington State unlawful-detainer (eviction) summons documents and extracts fields.
 
 Return ONLY valid raw JSON and nothing else. No prose, no code fences.
 
@@ -200,13 +217,11 @@ CASE FILED
 SUMMONS FILE DATE
 - Set "summons_file_date" based on when the document was filed in the court, rather than when it was signed.
 - Search priority (stop at the first match that fits):
-1) A clerk/e-filing stamp or header with words like "FILED", "E-FILED", "ACCEPTED", "ENTERED", "RECEIVED", "SUBMITTED", near a date/time (often on page 1, top-right).
-2) A docket/header watermark showing a file/entry date.
-
+  1) A clerk/e-filing stamp or header with words like "FILED", "E-FILED", "ACCEPTED", "ENTERED", "RECEIVED", "SUBMITTED", near a date/time (often on page 1, top-right).
+  2) A docket/header watermark showing a file/entry date.
 - If only a 2-digit year is present, assume 2000–2099 (e.g., 9/5/24 → 2024-09-05).
 - Normalize "summons_file_date" to ISO "YYYY-MM-DD".
 - Accept common variants (e.g., "9/5/24", "09/05/2024", "September 5, 2024") and normalize to "YYYY-MM-DD".
-
 
 ADDRESS (premises for the tenancy/defendant)
 - Choose the property/premises address for the tenancy/defendant (NOT the court, NOT the plaintiff firm).
@@ -324,20 +339,42 @@ to_row_summons <- function(x) {
 }
 
 #function to extract data from summons using prompt_summons
-parse_one <- function(txt) {
-  outer <- data_from_llm(prompt_summons, txt)
-  obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) return(NULL)
+parse_one <- function(txt, doc_id = NULL) {
+  result <- tryCatch({
+    outer <- data_from_llm(prompt_summons, txt)
+    obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
+    
+    if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Invalid response structure from LLM")
+      return(NULL)
+    }
+    
+    raw <- obj$choices[[1]]$message$content
+    raw <- trimws(clean_fences(raw))
+    
+    if (!validate(raw)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "LLM returned invalid JSON")
+      return(NULL)
+    }
+    
+    inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(inner)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Failed to parse inner JSON")
+      return(NULL)
+    }
+    
+    inner <- merge_dupe_vars(inner)
+    to_row_summons(inner)
+  }, error = function(e) {
+    warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+            "Error in parse_one: ", e$message)
+    return(NULL)
+  })
   
-  raw <- obj$choices[[1]]$message$content
-  raw <- trimws(clean_fences(raw))
-  if (!validate(raw)) return(NULL)
-  
-  inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(inner)) return(NULL)
-  
-  inner <- merge_dupe_vars(inner)
-  to_row_summons(inner)
+  return(result)
 }
 
 #run on test subset
@@ -349,7 +386,8 @@ llm_test_summons <- map2_dfr(
   docs_test_summons$text,
   seq_len(nrow(docs_test_summons)),
   ~{
-    res <- parse_one(.x)
+    cat(sprintf("Processing test document %d/%d\r", .y, nrow(docs_test_summons)))
+    res <- parse_one(.x, doc_id = docs_test_summons$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_test_summons$row_id[.y],
@@ -359,13 +397,23 @@ llm_test_summons <- map2_dfr(
     )
   }
 )
+cat("\n")
+
+cat(sprintf("Successfully processed %d/%d test documents\n", 
+            nrow(llm_test_summons), nrow(docs_test_summons)))
 
 ### run on all summons documents, and save .rds ###
+
 llm_data_summons <- map2_dfr(
   docs_to_run_summons$text,
   seq_len(nrow(docs_to_run_summons)),
   ~{
-    res <- parse_one(.x)
+    if (.y %% 10 == 0) {
+      cat(sprintf("Processing document %d/%d (%.1f%%)\n", 
+                  .y, nrow(docs_to_run_summons), 
+                  100 * .y / nrow(docs_to_run_summons)))
+    }
+    res <- parse_one(.x, doc_id = docs_to_run_summons$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_to_run_summons$row_id[.y],
@@ -375,5 +423,8 @@ llm_data_summons <- map2_dfr(
     )
   }
 )
+
+cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
+            nrow(llm_data_summons), nrow(docs_to_run_summons)))
 
 saveRDS(llm_data_summons, "data/llm_data_summons.rds")

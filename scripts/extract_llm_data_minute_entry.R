@@ -2,19 +2,37 @@
 ### reads .txt files from data/ocr output and .json metadata from data/ocr metadata
 ### working directory should be the main folder of the right-to-counsel-nudge repo
 
+#set Python path
+Sys.setenv(RETICULATE_PYTHON = file.path(getwd(), ".venv", "Scripts", "python.exe"))
+
 #load required packages
 library(tidyverse)
 library(reticulate)
 library(jsonlite)
 
 #load virtual environment and python
-use_virtualenv("/Users/wvg1/Documents/eviction-data/.venv", required = TRUE)
+venv_path <- file.path(getwd(), ".venv")
+if (!dir.exists(venv_path)) {
+  stop("Virtual environment not found at: ", venv_path, 
+       "\nPlease ensure .venv exists in the current working directory.")
+}
+use_virtualenv(venv_path, required = TRUE)
 py_config()
 py <- import_builtins()
 pickle <- import("pickle")
 
 #define python file
 source_python("scripts/data_from_llm.py")
+
+#simple JSON validator
+validate <- function(json_str) {
+  tryCatch({
+    fromJSON(json_str)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
 
 #function to read OCR output files into dataframe
 read_ocr_files <- function(text_folder, metadata_folder) {
@@ -46,7 +64,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     )
     
     #construct corresponding metadata path
-    relative_path <- sub(paste0("^", regex(text_folder)), "", txt_path)
+    relative_path <- sub(paste0("^", gsub("\\\\", "/", normalizePath(text_folder)), "/?"), "", gsub("\\\\", "/", txt_path))
     meta_path <- file.path(metadata_folder, sub("\\.txt$", ".json", relative_path))
     
     #read metadata
@@ -146,7 +164,7 @@ CONFIDENCE SCORES
 - Empty fields should generally have confidence 0.0 unless there is explicit evidence of absence.
 
 STRICT RULES
-- If a STRING field is unknown, set it to "" (empty string).
+- If a STRING field is unknown, set it to "" (empty string). If an ARRAY field is unknown, set it to [].
 - Do NOT guess. Prefer "" to an invented value.
 - Use only ASCII. Trim leading/trailing spaces; collapse internal whitespace to single spaces.
 - No newlines in any field. No trailing commas in JSON.
@@ -158,7 +176,7 @@ HEARING DATE
 - When multiple dates appear, choose in this priority:
   1) Date explicitly labeled "Hearing Date", "Date of Hearing", "On [date], the Court...", "In open court on [date]".
   2) Date near hearing header lines (e.g., document title block, caption block) clearly tied to the case hearing.
-3) Calendar references like "[9:00 AM] UD Calendar on [date]".
+  3) Calendar references like "[9:00 AM] UD Calendar on [date]".
 - Ignore file system timestamps, footer print dates, or e-filing metadata unless they are explicitly the hearing date.
 - If the year is missing but month/day are present and a nearby 4-digit year exists in the document header/caption, use that year. Otherwise return "".
 
@@ -262,20 +280,42 @@ to_row_minute_entry <- function(x) {
 }
 
 #function to extract data from minute entry docs using prompt_minute_entry
-parse_one <- function(txt) {
-  outer <- data_from_llm(prompt_minute_entry, txt)
-  obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) return(NULL)
+parse_one <- function(txt, doc_id = NULL) {
+  result <- tryCatch({
+    outer <- data_from_llm(prompt_minute_entry, txt)
+    obj   <- tryCatch(fromJSON(outer, simplifyVector = FALSE), error = function(e) NULL)
+    
+    if (is.null(obj) || is.null(obj$choices) || length(obj$choices) < 1) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Invalid response structure from LLM")
+      return(NULL)
+    }
+    
+    raw <- obj$choices[[1]]$message$content
+    raw <- trimws(clean_fences(raw))
+    
+    if (!validate(raw)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "LLM returned invalid JSON")
+      return(NULL)
+    }
+    
+    inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+    if (is.null(inner)) {
+      warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+              "Failed to parse inner JSON")
+      return(NULL)
+    }
+    
+    inner <- merge_dupe_vars(inner)
+    to_row_minute_entry(inner)
+  }, error = function(e) {
+    warning(if (!is.null(doc_id)) paste("Document", doc_id, ":") else "", 
+            "Error in parse_one: ", e$message)
+    return(NULL)
+  })
   
-  raw <- obj$choices[[1]]$message$content
-  raw <- trimws(clean_fences(raw))
-  if (!validate(raw)) return(NULL)
-  
-  inner <- tryCatch(fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
-  if (is.null(inner)) return(NULL)
-  
-  inner <- merge_dupe_vars(inner)
-  to_row_minute_entry(inner)
+  return(result)
 }
 
 #run on test subset
@@ -287,7 +327,8 @@ llm_test_minute_entry <- map2_dfr(
   docs_test_minute_entry$text,
   seq_len(nrow(docs_test_minute_entry)),
   ~{
-    res <- parse_one(.x)
+    cat(sprintf("Processing test document %d/%d\r", .y, nrow(docs_test_minute_entry)))
+    res <- parse_one(.x, doc_id = docs_test_minute_entry$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_test_minute_entry$row_id[.y],
@@ -297,13 +338,23 @@ llm_test_minute_entry <- map2_dfr(
     )
   }
 )
+cat("\n")
+
+cat(sprintf("Successfully processed %d/%d test documents\n", 
+            nrow(llm_test_minute_entry), nrow(docs_test_minute_entry)))
 
 ### run on all minute entry documents, and save .rds ###
+
 llm_data_minute_entry <- map2_dfr(
   docs_to_run_minute_entry$text,
   seq_len(nrow(docs_to_run_minute_entry)),
   ~{
-    res <- parse_one(.x)
+    if (.y %% 10 == 0) {
+      cat(sprintf("Processing document %d/%d (%.1f%%)\n", 
+                  .y, nrow(docs_to_run_minute_entry), 
+                  100 * .y / nrow(docs_to_run_minute_entry)))
+    }
+    res <- parse_one(.x, doc_id = docs_to_run_minute_entry$document[.y])
     if (is.null(res)) tibble()
     else bind_cols(
       tibble(row_id = docs_to_run_minute_entry$row_id[.y],
@@ -313,5 +364,8 @@ llm_data_minute_entry <- map2_dfr(
     )
   }
 )
+
+cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
+            nrow(llm_data_minute_entry), nrow(docs_to_run_minute_entry)))
 
 saveRDS(llm_data_minute_entry, "data/llm_data_minute_entry.rds")
