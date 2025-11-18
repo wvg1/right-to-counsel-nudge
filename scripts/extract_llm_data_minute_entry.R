@@ -34,6 +34,30 @@ validate <- function(json_str) {
   })
 }
 
+#function to extract case number from folder path
+#assumes folder structure like: data/ocr output/23-2-04870-4/document.txt
+extract_case_number_from_path <- function(txt_path, text_folder) {
+  text_folder <- normalizePath(text_folder)
+  txt_path <- normalizePath(txt_path)
+  
+  #get relative path from text_folder
+  relative_path <- sub(paste0("^", gsub("\\\\", "/", text_folder), "/?"), "", 
+                       gsub("\\\\", "/", txt_path))
+  
+  #extract first path component (should be case number folder)
+  parts <- strsplit(relative_path, "/")[[1]]
+  
+  if (length(parts) > 0) {
+    potential_case_num <- parts[1]
+    #validate against regex: ^\d{2}-\d-\d{5}-\d$
+    if (grepl("^\\d{2}-\\d-\\d{5}-\\d$", potential_case_num)) {
+      return(potential_case_num)
+    }
+  }
+  
+  return(NA_character_)
+}
+
 #function to read OCR output files into dataframe
 read_ocr_files <- function(text_folder, metadata_folder) {
   text_folder <- normalizePath(text_folder)
@@ -89,6 +113,9 @@ read_ocr_files <- function(text_folder, metadata_folder) {
     #extract directory (case folder)
     direc <- basename(dirname(txt_path))
     
+    #extract case number from folder path
+    folder_case_number <- extract_case_number_from_path(txt_path, text_folder)
+    
     tibble(
       row_id = NA_integer_,
       direc = direc,
@@ -96,6 +123,7 @@ read_ocr_files <- function(text_folder, metadata_folder) {
       text = text,
       source_file = metadata$source_file %||% txt_path,
       case_number = metadata$case_number %||% NA_character_,
+      folder_case_number = folder_case_number,
       relative_path = metadata$relative_path %||% relative_path,
       ocr_quality_score = metadata$ocr_quality_score %||% NA_real_,
       ocr_notes = metadata$ocr_notes %||% ""
@@ -333,17 +361,33 @@ llm_test_minute_entry <- map2_dfr(
     else bind_cols(
       tibble(row_id = docs_test_minute_entry$row_id[.y],
              direc    = docs_test_minute_entry$direc[.y],
-             document = docs_test_minute_entry$document[.y]),
+             document = docs_test_minute_entry$document[.y],
+             folder_case_number = docs_test_minute_entry$folder_case_number[.y]),
       res
     )
   }
 )
 cat("\n")
 
+#check for case number conflicts in test set
+test_conflicts <- llm_test_minute_entry %>%
+  filter(!is.na(folder_case_number)) %>%
+  mutate(llm_case_num = case_number) %>%
+  filter(llm_case_num != "" & llm_case_num != folder_case_number) %>%
+  select(row_id, direc, document, folder_case_number, llm_case_num, 
+         conf_case_number)
+
+if (nrow(test_conflicts) > 0) {
+  cat(sprintf("WARNING: Found %d case number conflicts in test set:\n", nrow(test_conflicts)))
+  print(test_conflicts)
+} else {
+  cat("No case number conflicts found in test set.\n")
+}
+
 cat(sprintf("Successfully processed %d/%d test documents\n", 
             nrow(llm_test_minute_entry), nrow(docs_test_minute_entry)))
 
-### run on all minute entry documents, and save .rds ###
+### run on all minute entry documents ###
 
 llm_data_minute_entry <- map2_dfr(
   docs_to_run_minute_entry$text,
@@ -359,7 +403,8 @@ llm_data_minute_entry <- map2_dfr(
     else bind_cols(
       tibble(row_id = docs_to_run_minute_entry$row_id[.y],
              direc    = docs_to_run_minute_entry$direc[.y],
-             document = docs_to_run_minute_entry$document[.y]),
+             document = docs_to_run_minute_entry$document[.y],
+             folder_case_number = docs_to_run_minute_entry$folder_case_number[.y]),
       res
     )
   }
@@ -367,5 +412,36 @@ llm_data_minute_entry <- map2_dfr(
 
 cat(sprintf("\nSuccessfully processed %d/%d documents\n", 
             nrow(llm_data_minute_entry), nrow(docs_to_run_minute_entry)))
+
+#check for case number conflicts in full dataset
+all_conflicts <- llm_data_minute_entry %>%
+  filter(!is.na(folder_case_number)) %>%
+  mutate(llm_case_num = case_number) %>%
+  filter(llm_case_num != "" & llm_case_num != folder_case_number) %>%
+  select(row_id, direc, document, folder_case_number, llm_case_num, 
+         conf_case_number)
+
+if (nrow(all_conflicts) > 0) {
+  cat(sprintf("Found %d case number conflicts:\n", nrow(all_conflicts)))
+  print(all_conflicts)
+} else {
+  cat("No case number conflicts found.\n")
+}
+
+#replace case numbers with folder case numbers when folder case number is valid
+llm_data_minute_entry <- llm_data_minute_entry %>%
+  mutate(
+    case_number_replaced = !is.na(folder_case_number) & 
+      (is.na(case_number) | case_number == "" | case_number != folder_case_number),
+    case_number = if_else(!is.na(folder_case_number), folder_case_number, case_number)
+  )
+
+#report on replacements
+n_replaced <- sum(llm_data_minute_entry$case_number_replaced, na.rm = TRUE)
+cat(sprintf("\nReplaced case numbers in %d documents\n", n_replaced))
+
+#remove temporary columns before saving
+llm_data_minute_entry <- llm_data_minute_entry %>%
+  select(-folder_case_number, -case_number_replaced)
 
 saveRDS(llm_data_minute_entry, "data/llm_data_minute_entry.rds")
