@@ -1,10 +1,11 @@
-###this script merges and collapses data extracted from OCR text of eviction documents using an LLM.
+###this script merges data extracted from LLM analysis of OCR text with data extracted via document name searches.
 ###requires .rds files created by llm data extraction scripts
-###working directory should be the main folder of the eviction-data repo
+###working directory should be the main folder of the right-to-counsel-nudge repo
 
 #load packages
 library(tidyverse)
 library(readxl)
+library(writexl)
 
 #read in rct data
 rct_data <- read_xlsx("data/pre_treatment_data.xlsx")
@@ -41,10 +42,6 @@ combined_rag_data_dedup <- combined_rag_data %>%
   arrange(desc(conf_defendants_at_hearing)) %>%
   slice(1) %>%
   ungroup()
-
-cat(sprintf("Original rows (with hearing_date): %d\n", 
-            sum(!is.na(combined_rag_data$hearing_date))))
-cat(sprintf("After deduplication: %d\n", nrow(combined_rag_data_dedup)))
 cat(sprintf("Rows removed: %d\n", 
             sum(!is.na(combined_rag_data$hearing_date)) - nrow(combined_rag_data_dedup)))
 
@@ -120,3 +117,6 @@ rct_data_rag_analysis <- rct_data_rag %>%
     hearing_ID, case_number, hearing_held, hearing_att, tenant_rep, tenant_rep_denied, 
     dismissal, dismissal_vacated, writ, writ_vacated, agreement, old, old_vacated, court_displacement
   )
+
+#export .xlsx
+write_xlsx(rct_data_rag_analysis, "data/rag_outcome_data.xlsx")
