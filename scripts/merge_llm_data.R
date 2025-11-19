@@ -18,7 +18,7 @@ doctype_data <- doctype_data %>%
       dismissal_vacated, writ, writ_vacated, agreement, old, old_vacated),
     ~ as.logical(.)
   ))
-  
+
 #read in llm data
 llm_data_agreement <- readRDS("data/llm_data_agreement.rds")
 llm_data_minute_entry <- readRDS("data/llm_data_minute_entry.rds")
@@ -34,12 +34,24 @@ combined_rag_data <- bind_rows(
 combined_rag_data <- combined_rag_data %>%
   mutate(hearing_date = as.Date(hearing_date))
 
-#NEED TO DEAL WITH CASES THAT HAVE MULTIPLE HEARINGS FOR THE SAME DAY
+### deduplication: For case_number/hearing_date combos with multiple rows, keep the row with highest confidence for defendants_at_hearing
+combined_rag_data_dedup <- combined_rag_data %>%
+  filter(!is.na(hearing_date)) %>%
+  group_by(case_number, hearing_date) %>%
+  arrange(desc(conf_defendants_at_hearing)) %>%
+  slice(1) %>%
+  ungroup()
 
-#create hearing-level hearing_held variable in new combined dataframe
+cat(sprintf("Original rows (with hearing_date): %d\n", 
+            sum(!is.na(combined_rag_data$hearing_date))))
+cat(sprintf("After deduplication: %d\n", nrow(combined_rag_data_dedup)))
+cat(sprintf("Rows removed: %d\n", 
+            sum(!is.na(combined_rag_data$hearing_date)) - nrow(combined_rag_data_dedup)))
+
+#create hearing-level hearing_held variable
 rct_data_rag <- rct_data %>%
   left_join(
-    combined_rag_data %>%
+    combined_rag_data_dedup %>%
       distinct(case_number, hearing_date) %>%
       mutate(hearing_held = TRUE),
     by = c("case_number", "hearing_date")
@@ -49,14 +61,14 @@ rct_data_rag <- rct_data %>%
 #create hearing-level defendants_present variable
 rct_data_rag <- rct_data_rag %>%
   left_join(
-    combined_rag_data %>%
+    combined_rag_data_dedup %>%
       select(case_number, hearing_date, defendants_at_hearing) %>%
       mutate(hearing_att = lengths(defendants_at_hearing) > 0) %>%
       distinct(case_number, hearing_date, hearing_att),
     by = c("case_number", "hearing_date")
   ) %>%
   mutate(hearing_att = coalesce(hearing_att, FALSE))
-  
+
 #merge in doctype_data, aggregate to case-level (TRUE if any TRUE for that case_number)
 rct_data_rag <- rct_data_rag %>%
   left_join(
@@ -105,6 +117,6 @@ rct_data_rag <- rct_data_rag %>%
 #final analysis data: one row per hearing_ID (n = 712)
 rct_data_rag_analysis <- rct_data_rag %>%
   select(
-    hearing_ID, case_number,hearing_held, hearing_att, tenant_rep, tenant_rep_denied, 
+    hearing_ID, case_number, hearing_held, hearing_att, tenant_rep, tenant_rep_denied, 
     dismissal, dismissal_vacated, writ, writ_vacated, agreement, old, old_vacated, court_displacement
   )
