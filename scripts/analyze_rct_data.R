@@ -18,6 +18,18 @@ data_for_analysis <- data_for_analysis %>%
                   old_vacated, court_displacement),
                 ~as.logical(.)))
 
+#create final outcome variables
+data_for_analysis <- data_for_analysis %>%
+  mutate(
+    writ_final = writ == TRUE & writ_vacated == FALSE,
+    dismissal_final = dismissal == TRUE & dismissal_vacated == FALSE,
+    old_final = old == TRUE & old_vacated == FALSE
+  )
+
+#create binary monetary judgment variable
+data_for_analysis <- data_for_analysis %>%
+  mutate(monetary_judgment_issued = monetary_judgment > 0)
+
 #mutate appearance_date variable, warnings just indicate presence of NAs (expected)
 data_for_analysis <- data_for_analysis %>%
   mutate(appearance_date = as.POSIXct(as.Date(as.numeric(appearance_date), 
@@ -72,6 +84,7 @@ multi_case_households
 with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, flag_tacoma)))
 with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, appearance_before_hearing)))
 
+###models 1-3: treatment effects on hearing outcomes
 #model 1: effect of any household-level treatment on hearing_held
 m1 <- glm(hearing_held ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma, 
           data = data_for_analysis, 
@@ -172,362 +185,150 @@ results_table <- bind_rows(
 #print table
 print(results_table)
 
+###models 4-10: treatment effects on case outcomes
+#model 4: screened for representation
+m4 <- glm(rep_screened ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V4 <- vcovCL(m4, cluster = data_for_analysis$household_ID, type = "HC1")
+ct4 <- coeftest(m4, vcov. = V4)
+m4_est <- ct4["household_treated_by_this_hearingTRUE", "Estimate"]
+m4_se <- ct4["household_treated_by_this_hearingTRUE", "Std. Error"]
+m4_or <- exp(m4_est)
+m4_or_lo <- exp(m4_est - 1.96 * m4_se)
+m4_or_hi <- exp(m4_est + 1.96 * m4_se)
 
+#model 5: representation appointed
+m5 <- glm(rep_appointed ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V5 <- vcovCL(m5, cluster = data_for_analysis$household_ID, type = "HC1")
+ct5 <- coeftest(m5, vcov. = V5)
+m5_est <- ct5["household_treated_by_this_hearingTRUE", "Estimate"]
+m5_se <- ct5["household_treated_by_this_hearingTRUE", "Std. Error"]
+m5_or <- exp(m5_est)
+m5_or_lo <- exp(m5_est - 1.96 * m5_se)
+m5_or_hi <- exp(m5_est + 1.96 * m5_se)
 
+#model 6: writ (not vacated)
+m6 <- glm(writ_final ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V6 <- vcovCL(m6, cluster = data_for_analysis$household_ID, type = "HC1")
+ct6 <- coeftest(m6, vcov. = V6)
+m6_est <- ct6["household_treated_by_this_hearingTRUE", "Estimate"]
+m6_se <- ct6["household_treated_by_this_hearingTRUE", "Std. Error"]
+m6_or <- exp(m6_est)
+m6_or_lo <- exp(m6_est - 1.96 * m6_se)
+m6_or_hi <- exp(m6_est + 1.96 * m6_se)
 
+#model 7: monetary judgment issued (binary)
+m7 <- glm(monetary_judgment_issued ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V7 <- vcovCL(m7, cluster = data_for_analysis$household_ID, type = "HC1")
+ct7 <- coeftest(m7, vcov. = V7)
+m7_est <- ct7["household_treated_by_this_hearingTRUE", "Estimate"]
+m7_se <- ct7["household_treated_by_this_hearingTRUE", "Std. Error"]
+m7_or <- exp(m7_est)
+m7_or_lo <- exp(m7_est - 1.96 * m7_se)
+m7_or_hi <- exp(m7_est + 1.96 * m7_se)
 
+#model 8: dismissal (not vacated)
+m8 <- glm(dismissal_final ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V8 <- vcovCL(m8, cluster = data_for_analysis$household_ID, type = "HC1")
+ct8 <- coeftest(m8, vcov. = V8)
+m8_est <- ct8["household_treated_by_this_hearingTRUE", "Estimate"]
+m8_se <- ct8["household_treated_by_this_hearingTRUE", "Std. Error"]
+m8_or <- exp(m8_est)
+m8_or_lo <- exp(m8_est - 1.96 * m8_se)
+m8_or_hi <- exp(m8_est + 1.96 * m8_se)
 
+#model 9: record protection orders (not vacated)
+m9 <- glm(old_final ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+          data = data_for_analysis,
+          family = binomial())
+V9 <- vcovCL(m9, cluster = data_for_analysis$household_ID, type = "HC1")
+ct9 <- coeftest(m9, vcov. = V9)
+m9_est <- ct9["household_treated_by_this_hearingTRUE", "Estimate"]
+m9_se <- ct9["household_treated_by_this_hearingTRUE", "Std. Error"]
+m9_or <- exp(m9_est)
+m9_or_lo <- exp(m9_est - 1.96 * m9_se)
+m9_or_hi <- exp(m9_est + 1.96 * m9_se)
 
+#model 10: court_displacement
+m10 <- glm(court_displacement ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+           data = data_for_analysis,
+           family = binomial())
+V10 <- vcovCL(m10, cluster = data_for_analysis$household_ID, type = "HC1")
+ct10 <- coeftest(m10, vcov. = V10)
+m10_est <- ct10["household_treated_by_this_hearingTRUE", "Estimate"]
+m10_se <- ct10["household_treated_by_this_hearingTRUE", "Std. Error"]
+m10_or <- exp(m10_est)
+m10_or_lo <- exp(m10_est - 1.96 * m10_se)
+m10_or_hi <- exp(m10_est + 1.96 * m10_se)
 
-#function to fit logistic regression using household-level treatment variable and return effect sizes with CIs
-fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_hearing + flag_tacoma + appearance_before_hearing"))
-  m   <- glm(fml, data = data, family = binomial())
-  
-  #align the cluster vector to the rows actually used in the model
-  mf <- model.frame(m)                              
-  idx <- as.integer(rownames(mf))                   
-  cl  <- data$case_no[idx]                     
-  
-  V   <- vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by case
-  ct  <- coeftest(m, vcov. = V)
-  
-  est <- ct["household_treated_by_this_hearing", "Estimate"]
-  se  <- ct["household_treated_by_this_hearing", "Std. Error"]
-  tibble(
-    outcome   = outcome,
-    n         = nobs(m),
-    events    = sum(model.frame(m)[[outcome]] == 1, na.rm = TRUE),
-    estimate  = est,
-    robust_se = se,
-    z         = est / se,
-    p_value   = 2 * pnorm(-abs(est / se)),
-    OR        = exp(est),
-    OR_lo     = exp(estimate - 1.96 * se),
-    OR_hi     = exp(estimate + 1.96 * se)
-  )
-}
+#combine results for plotting
+results_outcomes <- bind_rows(
+  tibble(outcome = "Rep. Screened", or = m4_or, or_lo = m4_or_lo, or_hi = m4_or_hi),
+  tibble(outcome = "Rep. Appointed", or = m5_or, or_lo = m5_or_lo, or_hi = m5_or_hi),
+  tibble(outcome = "Writ", or = m6_or, or_lo = m6_or_lo, or_hi = m6_or_hi),
+  tibble(outcome = "Judgment Issued", or = m7_or, or_lo = m7_or_lo, or_hi = m7_or_hi),
+  tibble(outcome = "Dismissal", or = m8_or, or_lo = m8_or_lo, or_hi = m8_or_hi),
+  tibble(outcome = "OLD", or = m9_or, or_lo = m9_or_lo, or_hi = m9_or_hi),
+  tibble(outcome = "Court Displacement", or = m10_or, or_lo = m10_or_lo, or_hi = m10_or_hi)
+) %>%
+  mutate(outcome = factor(outcome, levels = c("Screened", "Representation appointed", "Eviction judgment", 
+                                              "Monetary judgment issued", "Dismissal", "OLD", 
+                                              "Court Displacement")))
 
-#label hearing outcomes
-hearing_outcomes <- c("hearing_held",
-                     "hearing_att"
-)
-
-#analyze ITT effects on hearing outcomes
-data_itt <- data_for_analysis %>%
-  mutate(hearing_att = if_else(is.na(hearing_att) & hearing_held == 0, 0, hearing_att))
-
-results_itt <- map_dfr(hearing_outcomes, fit_one, data = data_itt) %>%
-  mutate(spec = "ITT (NA attendance -> 0 when no hearing)")
-
-results_itt
-
-#fit models on the same data used for ITT
-mods <- setNames(lapply(hearing_outcomes, function(y) {
-  glm(
-    reformulate(
-      c("household_treated_before_hearing", "flag_tacoma", "appearance_before_hearing"),
-      response = y
-    ),
-    data = data_itt, family = binomial()
-  )
-}), hearing_outcomes)
-
-#average marginal effects of the correct treatment term, with clustered SEs
-ame_tab <- imap_dfr(mods, function(m, y) {
-  ame <- avg_slopes(m,
-                    variables = "household_treated_before_hearing",
-                    vcov = ~ case_no)
-  tibble(
-    outcome = y,                          
-    AME_pp  = 100 * ame$estimate,        
-    AME_lo  = 100 * ame$conf.low,
-    AME_hi  = 100 * ame$conf.high
-  )
-})
-
-#join directly by raw outcome codes
-report_full <- results_itt %>%
-  left_join(ame_tab, by = "outcome")
-
-report_full %>%
-  select(-spec) %>%
-  print(n = Inf)
-
-#plot ITT effects on hearing outcomes
-#map codes to labels
-label_map <- c(
-  hearing_held = "Hearing held",
-  hearing_att  = "Attendance"
-)
-
-results_itt %>%
-  filter(outcome %in% names(label_map)) %>%
-  mutate(outcome_label = recode(outcome, !!!label_map),
-         outcome_label = factor(outcome_label,
-                                levels = c("Hearing held", "Attendance"))) %>%
-  ggplot(aes(x = OR, y = outcome_label)) +
+#plot treatment effects on case outcomes
+ggplot(results_outcomes, aes(x = or, y = outcome)) +
   geom_point(size = 2, color = "steelblue") +
-  geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
+  geom_errorbarh(aes(xmin = or_lo, xmax = or_hi),
                  height = 0.15, linewidth = 0.8, color = "steelblue") +
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
-  scale_x_log10(
-    breaks = c(0.5, 1, 2, 3),
-    limits = c(0.4, 3.5),
-    expand = expansion(mult = c(0.02, 0.06))   # add padding inside panel
-  ) +
-  scale_y_discrete(labels = function(x) sub("\\s", "\n", x)) +
-  labs(
-    x = "Odds Ratio (log scale)",
-    y = NULL,
-    title = "Treatment Effects on Hearing Outcomes"
-  ) +
-  theme_minimal(base_size = 10, base_family = "serif") +
-  theme(
-    panel.grid.minor = element_blank(),
-    axis.text.y  = element_text(size = 10, margin = margin(r = 8)),
-    axis.text.x  = element_text(margin = margin(t = 6)),               
-    axis.title.x = element_text(margin = margin(t = 10)),              
-    plot.title   = element_text(size = 12, face = "bold", hjust = 0,
-                                margin = margin(b = 12)),               
-    plot.margin  = margin(t = 4, r = 6, b = 4, l = 4)              
-  )
+  scale_x_log10(breaks = c(0.5, 1, 2), limits = c(0.3, 2.5)) +
+  labs(x = "Odds Ratio (log scale)", y = NULL, 
+       title = "Treatment Effects on Case Outcomes") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0, margin = margin(b = 10)))
 
-#analyze CATE effects on hearing outcomes
-hearing_outcomes_cate <- c("hearing_att", "rep_screened")
-data_cate <- data_for_analysis %>% filter(hearing_held == 1)
-
-results_cate <- map_dfr(hearing_outcomes_cate, fit_one, data = data_cate) %>%
-  mutate(spec = "CATE (subset: hearing held)")
-
-mods_cate <- setNames(lapply(hearing_outcomes_cate, function(y) {
-  glm(reformulate(c("household_treated_before_hearing",
-                    "flag_tacoma", "appearance_before_hearing"),
-                  response = y),
-      data = data_cate, family = binomial())
-}), hearing_outcomes_cate)
-
-ame_cate <- imap_dfr(mods_cate, function(m, y) {
-  ame <- avg_slopes(
-    m,
-    variables = "household_treated_before_hearing",
-    vcov = ~ case_no
-  )
-  tibble(
-    outcome = y,
-    AME_pp  = 100 * ame$estimate,
-    AME_lo  = 100 * ame$conf.low,
-    AME_hi  = 100 * ame$conf.high
-  )
-})
-
-report_cate <- results_cate %>%
-  left_join(ame_cate, by = "outcome")
-
-report_cate %>%
-  select(-spec) %>%
-  print(n = Inf)
-
-#analyze ITT effects on binary case outcomes
-binary_case_outcomes <- c(
-                     "rep_screened",
-                     "rep_appointed",
-                     "writ_final",
-                     "dismissal_final",
-                     "old_final",
-                     "forced_move",
-                     "monetary_judgment_binary"
-)
-
-#function to fit logistic regressions and return effect sizes with CIs
-fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing"))
-  m   <- glm(fml, data = data, family = binomial())
-  
-  # align the cluster vector to the rows actually used in the model
-  mf <- model.frame(m)                              # rows kept by glm after NA handling
-  idx <- as.integer(rownames(mf))                   # row indices in `data`
-  cl  <- data$household_ID[idx]                     # cluster vector aligned to m’s rows
-  
-  V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by household
-  ct  <- lmtest::coeftest(m, vcov. = V)
-  
-  est <- ct["household_treated_by_this_case", "Estimate"]
-  se  <- ct["household_treated_by_this_case", "Std. Error"]
-  tibble(
-    outcome   = outcome,
-    n         = nobs(m),
-    events    = sum(model.frame(m)[[outcome]] == 1, na.rm = TRUE),
-    estimate  = est,
-    robust_se = se,
-    z         = est / se,
-    p_value   = 2 * pnorm(-abs(est / se)),
-    OR        = exp(est),
-    OR_lo     = exp(estimate - 1.96 * se),
-    OR_hi     = exp(estimate + 1.96 * se)
-  )
-}
-
-#analyze binary case outcomes using ITT approach
-data_itt_case_outcomes <- data_for_analysis %>%
-  mutate(hearing_att = if_else(is.na(hearing_att) & hearing_held == 0, 0, hearing_att))
-
-results_itt_case_outcomes <- map_dfr(binary_case_outcomes, fit_one, data = data_itt_case_outcomes) %>%
-  mutate(spec = "ITT (NA attendance -> 0 when no hearing)")
-
-#print all effects on binary outcomes
-case_outcome_results <- bind_rows(
-  results_itt_case_outcomes) %>%
+#create table with case outcome results
+case_outcomes_table <- bind_rows(
+  tibble(outcome = "Screened for representation", 
+         n = nobs(m4), events = sum(model.frame(m4)$rep_screened == 1, na.rm = TRUE),
+         or = m4_or, or_lo = m4_or_lo, or_hi = m4_or_hi, p = 2 * pnorm(-abs(m4_est / m4_se))),
+  tibble(outcome = "Representation appointed",
+         n = nobs(m5), events = sum(model.frame(m5)$rep_appointed == 1, na.rm = TRUE),
+         or = m5_or, or_lo = m5_or_lo, or_hi = m5_or_hi, p = 2 * pnorm(-abs(m5_est / m5_se))),
+  tibble(outcome = "Eviction judgment",
+         n = nobs(m6), events = sum(model.frame(m6)$writ == 1, na.rm = TRUE),
+         or = m6_or, or_lo = m6_or_lo, or_hi = m6_or_hi, p = 2 * pnorm(-abs(m6_est / m6_se))),
+  tibble(outcome = "Monetary judgment Issued",
+         n = nobs(m7), events = sum(model.frame(m7)$judgment_issued == 1, na.rm = TRUE),
+         or = m7_or, or_lo = m7_or_lo, or_hi = m7_or_hi, p = 2 * pnorm(-abs(m7_est / m7_se))),
+  tibble(outcome = "Dismissal",
+         n = nobs(m8), events = sum(model.frame(m8)$dismissal == 1, na.rm = TRUE),
+         or = m8_or, or_lo = m8_or_lo, or_hi = m8_or_hi, p = 2 * pnorm(-abs(m8_est / m8_se))),
+  tibble(outcome = "Order for Limited Dissemination",
+         n = nobs(m9), events = sum(model.frame(m9)$old == 1, na.rm = TRUE),
+         or = m9_or, or_lo = m9_or_lo, or_hi = m9_or_hi, p = 2 * pnorm(-abs(m9_est / m9_se))),
+  tibble(outcome = "Court Displacement",
+         n = nobs(m10), events = sum(model.frame(m10)$court_displacement == 1, na.rm = TRUE),
+         or = m10_or, or_lo = m10_or_lo, or_hi = m10_or_hi, p = 2 * pnorm(-abs(m10_est / m10_se))),
+) %>%
   mutate(
-    outcome = recode(outcome,
-                     writ_final   = "Writ issued",
-                     dismissal_final = "Dismissal",
-                     old_final    = "Order of limited dissemination issued",
-                     forced_move  = "Forced move",
-                     monetary_judgment_binary = "Monetary judgment issued",
-                     rep_screened = "Screened for representation",
-                     rep_appointed = "Representation appointed"
-    )
+    Outcome = outcome,
+    N = n,
+    Events = events,
+    `Odds Ratio` = round(or, 3),
+    `95% CI` = paste0("[", round(or_lo, 3), ", ", round(or_hi, 3), "]"),
+    `p-value` = round(p, 3)
   ) %>%
-  arrange(spec, outcome)
+  select(Outcome, N, Events, `Odds Ratio`, `95% CI`, `p-value`)
 
-case_outcome_results
-
-#refit and save logistic regressions
-mods <- setNames(lapply(binary_case_outcomes, function(y) {
-  glm(as.formula(paste0(y, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing")),
-      data = data_itt_case_outcomes, family = binomial())
-}), binary_case_outcomes)
-
-#use clustered SEs directly inside marginaleffects
-ame_tab <- imap_dfr(mods, function(m, y) {
-  ame <- avg_slopes(m, variables = "household_treated_by_this_case", vcov = ~ case_no)
-  tibble(outcome = y,
-         AME_pp = 100 * ame$estimate,
-         AME_lo = 100 * ame$conf.low,
-         AME_hi = 100 * ame$conf.high)
-})
-
-#map from raw outcome var -> pretty label used in all_results$outcome
-outcome_map <- tibble(
-  outcome_raw = c(
-    "dismissal_final",
-    "writ_final",
-    "old_final",
-    "monetary_judgment_binary",
-    "forced_move",
-    "rep_screened",
-    "rep_appointed"
-  ),
-  outcome_label = c(
-    "Dismissal",
-    "Writ issued",
-    "Order of limited dissemination issued",
-    "Monetary judgment issued",
-    "Forced move",
-    "Screened for representation",
-    "Representation appointed"
-  )
-)
-
-#recode AME table to the same labels, then join
-ame_tab_labeled <- ame_tab %>%
-  rename(outcome_raw = outcome) %>%
-  left_join(outcome_map, by = "outcome_raw") %>%
-  transmute(outcome = outcome_label, AME_pp, AME_lo, AME_hi)
-
-report_full_case_outcomes <- case_outcome_results %>%
-  left_join(ame_tab_labeled, by = "outcome")
-
-report_full_case_outcomes %>%
-  select(-spec) %>%
-  print(n = Inf)
-
-fit_one_continuous <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing"))
-  m   <- lm(fml, data = data)
-  
-  #align the cluster vector to the rows actually used in the model
-  mf <- model.frame(m)                              
-  idx <- as.integer(rownames(mf))                   
-  cl  <- data$household_ID[idx]                     
-  
-  V   <- sandwich::vcovCL(m, cluster = cl, type = "HC1")
-  ct  <- lmtest::coeftest(m, vcov. = V)
-  
-  est <- ct["household_treated_by_this_case", "Estimate"]
-  se  <- ct["household_treated_by_this_case", "Std. Error"]
-  tibble(
-    outcome   = outcome,
-    n         = nobs(m),
-    estimate  = est,
-    robust_se = se,
-    t_stat    = est / se,
-    p_value   = 2 * pt(-abs(est / se), df = nobs(m) - 1),
-    ci_lo     = est - 1.96 * se,
-    ci_hi     = est + 1.96 * se
-  )
-}
-
-#analyze treatment effect on monetary_judgment
-results_monetary <- fit_one_continuous("monetary_judgment", data = data_itt_case_outcomes)
-
-results_monetary %>%
-  print(n = Inf)
-
-#plot ITT effects on case outcomes
-#map codes to labels
-label_map_case_outcomes <- c(
-  writ_final   = "Writ issued",
-  dismissal_final = "Dismissal",
-  old_final    = "Order of limited dissemination issued",
-  forced_move  = "Forced move",
-  monetary_judgment_binary = "Monetary judgment issued",
-  rep_appointed = "Representation appointed",
-  rep_screened = "Screened for representation"
-)
-
-#define base order
-base_lvls <- c(
-  "Writ issued", "Dismissal",
-  "Order of limited dissemination issued",
-  "Forced move", "Monetary judgment issued",
-  "Representation appointed", "Screened for representation"
-)
-
-#interleave invisible spacer levels (one between each real level)
-spaced_lvls <- c(rbind(base_lvls, paste0("___spacer_", seq_along(base_lvls))))
-spaced_lvls <- spaced_lvls[-length(spaced_lvls)]  # drop trailing spacer
-
-results_itt_case_outcomes %>%
-  filter(outcome %in% names(label_map_case_outcomes)) %>%
-  mutate(
-    outcome_label = recode(outcome, !!!label_map_case_outcomes),
-    outcome_label = factor(outcome_label, levels = base_lvls)
-  ) %>%
-  ggplot(aes(x = OR, y = outcome_label)) +
-  geom_point(size = 2, color = "steelblue") +
-  geom_errorbarh(aes(xmin = OR_lo, xmax = OR_hi),
-                 height = 0.1, linewidth = 0.8, color = "steelblue") +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
-  scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
-  scale_y_discrete(
-    limits = spaced_lvls,                             # inserts blank rows between categories
-    breaks = base_lvls,                               # only label real categories
-    labels = function(x) str_wrap(x, width = 22)
-  ) +
-  labs(
-    x = "Odds Ratio (log scale)",
-    y = NULL,
-    title = "Treatment Effects on Case Outcomes"
-  ) +
-  theme_minimal(base_size = 10, base_family = "serif") +
-  theme(
-    panel.grid.minor = element_blank(),
-    axis.text.y = element_text(size = 10, margin = margin(r = 8)),
-    axis.text.x = element_text(margin = margin(t = 6)),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    plot.title = element_text(size = 12, face = "bold", hjust = 0, margin = margin(b = 12)),
-    plot.margin = margin(10, 10, 10, 10)
-  )
-
+#print table
+print(case_outcomes_table)
