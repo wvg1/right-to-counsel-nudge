@@ -1,45 +1,48 @@
-### this script analyzes the final anonymized dataset from an experiment testing the effectiveness of a mailer for increasing access to WA's right to counsel program
-#before running, ensure rct_data_sensitive has been created from create_full_data.R
+### this script analyzes the final dataset from an experiment testing the effectiveness of a mailer for increasing access to WA's right to counsel program
+#setwd as right-to-counsel-nudge prior to running
 
 #load packages
 library(tidyverse)
+library(readxl)
 library(sandwich)
 library(lmtest)
-library(marginaleffects)
-library(stargazer) #if desired
 
-#create dataframe of completed cases
-data_for_analysis <- rct_data_sensitive %>%
-  select(
-    case_no,
-    hearing_ID,
-    household_ID,
-    flag_tacoma,
-    mail_date,
-    hearing_date,
-    appearance,
-    appearance_before_hearing,
-    appearance_date,
-    appearance_provider,
-    treat,
-    household_treated_before_hearing,
-    household_treated_by_this_case,
-    hearing_held,
-    hearing_att,
-    rep_screened,
-    rep_appointed,
-    rep_waived,
-    rep_denied,
-    writ_final,
-    dismissal_final,
-    old_final,
-    forced_move,
-    monetary_judgment,
-    monetary_judgment_binary,
-    end_date,
-    case_length
+#read in data
+data_for_analysis <- read_xlsx("data/final_data_for_analysis.xlsx")
+
+#mutate binary variables to logical
+data_for_analysis <- data_for_analysis %>%
+  mutate(across(c(appearance, appearance_provider, treat, hearing_held, hearing_att, rep_screened, 
+                  rep_appointed, rep_waived, rep_denied, writ, writ_vacated, 
+                  dismissal, dismissal_vacated, old, 
+                  old_vacated, court_displacement),
+                ~as.logical(.)))
+
+#mutate appearance_date variable, warnings just indicate presence of NAs (expected)
+data_for_analysis <- data_for_analysis %>%
+  mutate(appearance_date = as.POSIXct(as.Date(as.numeric(appearance_date), 
+                                              origin = "1899-12-30")))
+
+#create flag for tacoma addresses (flag_tacoma)
+data_for_analysis <- data_for_analysis %>%
+  mutate(flag_tacoma = city == "Tacoma")
+
+#create hearing-level variable for appearance before hearing (appearance_before_hearing)
+data_for_analysis <- data_for_analysis %>%
+  mutate(appearance_before_hearing = if_else(
+    is.na(appearance_date),
+    FALSE,
+    appearance_date < hearing_date
+  ))
+
+#create hearing-level variable indicating prior household treatment (household_treated_by_this_hearing) 
+data_for_analysis <- data_for_analysis %>%
+  arrange(household_ID, hearing_date) %>%
+  group_by(household_ID) %>%
+  mutate(
+    household_treated_by_this_hearing = cumsum(treat == 1 & mail_date < hearing_date) > 0
   ) %>%
-  filter(!is.na(end_date))
+  ungroup()
 
 #what are the duplicate household_IDs?
 dup_households <- data_for_analysis %>%
@@ -64,53 +67,124 @@ multi_case_households <- data_for_analysis %>%
 multi_case_households
 
 ###begin analysis ###
+
 #quick balancing test for all hearings
-with(data_for_analysis, chisq.test(table(household_treated_before_hearing,flag_tacoma)))
-with(data_for_analysis, chisq.test(table(household_treated_before_hearing,appearance_before_hearing)))
-with(data_for_analysis, chisq.test(table(household_treated_before_hearing,appearance_provider)))
+with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, flag_tacoma)))
+with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, appearance_before_hearing)))
 
-#print crosstabs and proportions for hearing prior to treatment vs. tacoma
-df_flag <- transform(
-  data_for_analysis,
-  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
-  flag_tacoma  = factor(flag_tacoma,  levels = c(0,1), labels = c("No","Yes"))
-)
-tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, flag_tacoma))
-tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+#model 1: effect of any household-level treatment on hearing_held
+m1 <- glm(hearing_held ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma, 
+          data = data_for_analysis, 
+          family = binomial())
 
-tab_flag_counts
-tab_flag_rowpct 
+V1 <- vcovCL(m1, cluster = data_for_analysis$household_ID, type = "HC1")
+ct1 <- coeftest(m1, vcov. = V1)
 
-#print crosstabs and proportions for hearing prior to treatment vs. answer before hearing
-df_flag <- transform(
-  data_for_analysis,
-  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
-  appearance_before_hearing  = factor(appearance_before_hearing,  levels = c(0,1), labels = c("No","Yes"))
-)
-tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, appearance_before_hearing))
-tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+#odds ratios
+m1_est <- ct1["household_treated_by_this_hearingTRUE", "Estimate"]
+m1_se <- ct1["household_treated_by_this_hearingTRUE", "Std. Error"]
+m1_or <- exp(m1_est)
+m1_or_lo <- exp(m1_est - 1.96 * m1_se)
+m1_or_hi <- exp(m1_est + 1.96 * m1_se)
 
-tab_flag_counts
-tab_flag_rowpct
+#model 2: effect of treatment on hearing attendance (all cases)
 
-#print crosstabs and proportions for hearing prior to treatment vs. answer with provider logo
-df_flag <- transform(
-  data_for_analysis,
-  household_treated_before_hearing = factor(household_treated_before_hearing, levels = c(0,1), labels = c("No","Yes")),
-  appearance_provider  = factor(appearance_provider,  levels = c(0,1), labels = c("No","Yes"))
-)
-tab_flag_counts <- with(df_flag, table(household_treated_before_hearing, appearance_provider))
-tab_flag_rowpct <- round(100 * prop.table(tab_flag_counts, margin = 1), 1)
+#model 2: effect of treatment on hearing attendance (all cases, NAs as 0)
+#first create dataframe where hearing_att = 0 if no hearing
+data_for_m2 <- data_for_analysis %>%
+  mutate(hearing_att = if_else(is.na(hearing_att), FALSE, hearing_att))
 
-tab_flag_counts
-tab_flag_rowpct
+m2 <- glm(hearing_att ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma, 
+          data = data_for_m2, 
+          family = binomial())
+
+V2 <- vcovCL(m2, cluster = data_for_m2$household_ID, type = "HC1")
+ct2 <- coeftest(m2, vcov. = V2)
+
+m2_est <- ct2["household_treated_by_this_hearingTRUE", "Estimate"]
+m2_se <- ct2["household_treated_by_this_hearingTRUE", "Std. Error"]
+m2_or <- exp(m2_est)
+m2_or_lo <- exp(m2_est - 1.96 * m2_se)
+m2_or_hi <- exp(m2_est + 1.96 * m2_se)
+
+#model 3: effect of treatment on hearing attendance (conditional on hearing held)
+m3 <- glm(hearing_att ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma, 
+          data = data_for_analysis %>% filter(hearing_held == TRUE), 
+          family = binomial())
+
+V3 <- vcovCL(m3, cluster = data_for_analysis %>% filter(hearing_held == TRUE) %>% pull(household_ID), type = "HC1")
+ct3 <- coeftest(m3, vcov. = V3)
+
+#odds ratios
+m3_est <- ct3["household_treated_by_this_hearingTRUE", "Estimate"]
+m3_se <- ct3["household_treated_by_this_hearingTRUE", "Std. Error"]
+m3_or <- exp(m3_est)
+m3_or_lo <- exp(m3_est - 1.96 * m3_se)
+m3_or_hi <- exp(m3_est + 1.96 * m3_se)
+
+#combine results for plotting (m1 and m2 only)
+results <- bind_rows(
+  tibble(outcome = "Hearing held", or = m1_or, or_lo = m1_or_lo, or_hi = m1_or_hi),
+  tibble(outcome = "Attendance", or = m2_or, or_lo = m2_or_lo, or_hi = m2_or_hi)
+) %>%
+  mutate(outcome = factor(outcome, levels = c("Hearing held", "Attendance")))
+
+#plot treatment effects
+ggplot(results, aes(x = or, y = outcome)) +
+  geom_point(size = 2, color = "steelblue") +
+  geom_errorbarh(aes(xmin = or_lo, xmax = or_hi),
+                 height = 0.15, linewidth = 0.8, color = "steelblue") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
+  scale_x_log10(breaks = c(0.5, 1, 2, 3), limits = c(0.4, 3.5)) +
+  labs(x = "Odds Ratio (log scale)", y = NULL, 
+       title = "Treatment Effects on Hearing Outcomes") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0, margin = margin(b = 10)))
+
+#create table with all three models, including sample sizes and p-values
+results_table <- bind_rows(
+  tibble(outcome = "Hearing held", 
+         n = nobs(m1),
+         events = sum(model.frame(m1)$hearing_held == 1, na.rm = TRUE),
+         or = m1_or, or_lo = m1_or_lo, or_hi = m1_or_hi,
+         p = 2 * pnorm(-abs(m1_est / m1_se))),
+  tibble(outcome = "Attendance (all cases)",
+         n = nobs(m2),
+         events = sum(model.frame(m2)$hearing_att == 1, na.rm = TRUE),
+         or = m2_or, or_lo = m2_or_lo, or_hi = m2_or_hi,
+         p = 2 * pnorm(-abs(m2_est / m2_se))),
+  tibble(outcome = "Attendance (conditional)",
+         n = nobs(m3),
+         events = sum(model.frame(m3)$hearing_att == 1, na.rm = TRUE),
+         or = m3_or, or_lo = m3_or_lo, or_hi = m3_or_hi,
+         p = 2 * pnorm(-abs(m3_est / m3_se)))
+) %>%
+  mutate(
+    Outcome = outcome,
+    N = n,
+    Events = events,
+    `Odds Ratio` = round(or, 3),
+    `95% CI` = paste0("[", round(or_lo, 3), ", ", round(or_hi, 3), "]"),
+    `p-value` = round(p, 3)
+  ) %>%
+  select(Outcome, N, Events, `Odds Ratio`, `95% CI`, `p-value`)
+
+#print table
+print(results_table)
+
+
+
+
+
+
+
 
 #function to fit logistic regression using household-level treatment variable and return effect sizes with CIs
 fit_one <- function(outcome, data) {
-  fml <- as.formula(paste0(outcome, " ~ household_treated_before_hearing + flag_tacoma + appearance_before_hearing"))
+  fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_hearing + flag_tacoma + appearance_before_hearing"))
   m   <- glm(fml, data = data, family = binomial())
   
-  # Align the cluster vector to the rows actually used in the model
+  #align the cluster vector to the rows actually used in the model
   mf <- model.frame(m)                              
   idx <- as.integer(rownames(mf))                   
   cl  <- data$case_no[idx]                     
@@ -118,8 +192,8 @@ fit_one <- function(outcome, data) {
   V   <- vcovCL(m, cluster = cl, type = "HC1")  # cluster-robust by case
   ct  <- coeftest(m, vcov. = V)
   
-  est <- ct["household_treated_before_hearing", "Estimate"]
-  se  <- ct["household_treated_before_hearing", "Std. Error"]
+  est <- ct["household_treated_by_this_hearing", "Estimate"]
+  se  <- ct["household_treated_by_this_hearing", "Std. Error"]
   tibble(
     outcome   = outcome,
     n         = nobs(m),
@@ -270,7 +344,7 @@ fit_one <- function(outcome, data) {
   fml <- as.formula(paste0(outcome, " ~ household_treated_by_this_case + flag_tacoma + appearance_before_hearing"))
   m   <- glm(fml, data = data, family = binomial())
   
-  # Align the cluster vector to the rows actually used in the model
+  # align the cluster vector to the rows actually used in the model
   mf <- model.frame(m)                              # rows kept by glm after NA handling
   idx <- as.integer(rownames(mf))                   # row indices in `data`
   cl  <- data$household_ID[idx]                     # cluster vector aligned to m’s rows
@@ -421,7 +495,7 @@ base_lvls <- c(
   "Representation appointed", "Screened for representation"
 )
 
-# 2) Interleave invisible spacer levels (one between each real level)
+#interleave invisible spacer levels (one between each real level)
 spaced_lvls <- c(rbind(base_lvls, paste0("___spacer_", seq_along(base_lvls))))
 spaced_lvls <- spaced_lvls[-length(spaced_lvls)]  # drop trailing spacer
 
