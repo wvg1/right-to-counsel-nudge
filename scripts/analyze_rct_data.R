@@ -140,7 +140,7 @@ results <- bind_rows(
   tibble(outcome = "Hearing held", or = m1_or, or_lo = m1_or_lo, or_hi = m1_or_hi),
   tibble(outcome = "Attendance", or = m2_or, or_lo = m2_or_lo, or_hi = m2_or_hi)
 ) %>%
-  mutate(outcome = factor(outcome, levels = c("Hearing held", "Attendance")))
+  mutate(outcome = factor(outcome, levels = c("Attendance", "Hearing held")))
 
 #plot treatment effects
 ggplot(results, aes(x = or, y = outcome)) +
@@ -272,17 +272,18 @@ m10_or_hi <- exp(m10_est + 1.96 * m10_se)
 
 #combine results for plotting
 results_outcomes <- bind_rows(
-  tibble(outcome = "Rep. Screened", or = m4_or, or_lo = m4_or_lo, or_hi = m4_or_hi),
-  tibble(outcome = "Rep. Appointed", or = m5_or, or_lo = m5_or_lo, or_hi = m5_or_hi),
-  tibble(outcome = "Writ", or = m6_or, or_lo = m6_or_lo, or_hi = m6_or_hi),
-  tibble(outcome = "Judgment Issued", or = m7_or, or_lo = m7_or_lo, or_hi = m7_or_hi),
+  tibble(outcome = "Screened for representation", or = m4_or, or_lo = m4_or_lo, or_hi = m4_or_hi),
+  tibble(outcome = "Representation appointed", or = m5_or, or_lo = m5_or_lo, or_hi = m5_or_hi),
+  tibble(outcome = "Eviction judgment", or = m6_or, or_lo = m6_or_lo, or_hi = m6_or_hi),
+  tibble(outcome = "Monetary judgment issued", or = m7_or, or_lo = m7_or_lo, or_hi = m7_or_hi),
   tibble(outcome = "Dismissal", or = m8_or, or_lo = m8_or_lo, or_hi = m8_or_hi),
-  tibble(outcome = "OLD", or = m9_or, or_lo = m9_or_lo, or_hi = m9_or_hi),
-  tibble(outcome = "Court Displacement", or = m10_or, or_lo = m10_or_lo, or_hi = m10_or_hi)
+  tibble(outcome = "Record protected", or = m9_or, or_lo = m9_or_lo, or_hi = m9_or_hi),
+  tibble(outcome = "Court displacement", or = m10_or, or_lo = m10_or_lo, or_hi = m10_or_hi)
 ) %>%
-  mutate(outcome = factor(outcome, levels = c("Rep. Screened", "Rep. Appointed", "Writ", 
-                                              "Judgment Issued", "Dismissal", "OLD", 
-                                              "Court Displacement")))
+  mutate(outcome = factor(outcome, levels = c("Court displacement", "Record protected",
+                                              "Dismissal", "Monetary judgment issued",
+                                              "Eviction judgment", "Representation appointed",
+                                              "Screened for representation")))
 
 #plot treatment effects on case outcomes
 ggplot(results_outcomes, aes(x = or, y = outcome)) +
@@ -379,7 +380,7 @@ data_for_analysis %>%
   summarise(mean_judgment = mean(monetary_judgment, na.rm = TRUE))
 print(m_11b_pct_change)
 
-#histogram with facets
+#histograms
 data_for_analysis %>%
   filter(monetary_judgment > 0) %>%
   mutate(treatment = if_else(household_treated_by_this_hearing, "Treatment", "Control")) %>%
