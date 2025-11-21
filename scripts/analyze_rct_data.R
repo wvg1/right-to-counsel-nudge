@@ -280,8 +280,8 @@ results_outcomes <- bind_rows(
   tibble(outcome = "OLD", or = m9_or, or_lo = m9_or_lo, or_hi = m9_or_hi),
   tibble(outcome = "Court Displacement", or = m10_or, or_lo = m10_or_lo, or_hi = m10_or_hi)
 ) %>%
-  mutate(outcome = factor(outcome, levels = c("Screened", "Representation appointed", "Eviction judgment", 
-                                              "Monetary judgment issued", "Dismissal", "OLD", 
+  mutate(outcome = factor(outcome, levels = c("Rep. Screened", "Rep. Appointed", "Writ", 
+                                              "Judgment Issued", "Dismissal", "OLD", 
                                               "Court Displacement")))
 
 #plot treatment effects on case outcomes
@@ -308,7 +308,7 @@ case_outcomes_table <- bind_rows(
          n = nobs(m6), events = sum(model.frame(m6)$writ == 1, na.rm = TRUE),
          or = m6_or, or_lo = m6_or_lo, or_hi = m6_or_hi, p = 2 * pnorm(-abs(m6_est / m6_se))),
   tibble(outcome = "Monetary judgment Issued",
-         n = nobs(m7), events = sum(model.frame(m7)$judgment_issued == 1, na.rm = TRUE),
+         n = nobs(m7), events = sum(model.frame(m7)$monetary_judgment_issued == 1, na.rm = TRUE),
          or = m7_or, or_lo = m7_or_lo, or_hi = m7_or_hi, p = 2 * pnorm(-abs(m7_est / m7_se))),
   tibble(outcome = "Dismissal",
          n = nobs(m8), events = sum(model.frame(m8)$dismissal == 1, na.rm = TRUE),
@@ -331,4 +331,77 @@ case_outcomes_table <- bind_rows(
   select(Outcome, N, Events, `Odds Ratio`, `95% CI`, `p-value`)
 
 #print table
-print(case_outcomes_table)
+print(case_outcomes_table, width = 100)
+
+#model 11: effect on amount of monetary judgment
+
+#11a: logistic regression on whether judgment was issued
+m_11a <- glm(judgment_issued ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+               data = data_for_analysis,
+               family = binomial())
+
+V_11a <- vcovCL(m_11a, cluster = data_for_analysis$household_ID, type = "HC1")
+ct_11a <- coeftest(m_11a, vcov. = V_part1)
+
+m_11a_est <- ct_11a["household_treated_by_this_hearingTRUE", "Estimate"]
+m_11a_se <- ct_11a["household_treated_by_this_hearingTRUE", "Std. Error"]
+m_11a_or <- exp(m_11a_est)
+m_11a_or_lo <- exp(m_11a_est - 1.96 * m_11a_se)
+m_11a_or_hi <- exp(m_11a_est + 1.96 * m_11a_se)
+
+#11b: OLS regression on log(monetary judgment) among cases with positive judgments
+data_11b <- data_for_analysis %>%
+  filter(monetary_judgment > 0) %>%
+  mutate(log_judgment = log(monetary_judgment))
+
+m_11b <- lm(log_judgment ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+            data = data_11b)
+
+V_11b <- vcovCL(m_11b, cluster = data_11b$household_ID, type = "HC1")
+ct_11b <- coeftest(m_11b, vcov. = V_11b)
+
+m_11b_est <- ct_11b["household_treated_by_this_hearingTRUE", "Estimate"]
+m_11b_se <- ct_11b["household_treated_by_this_hearingTRUE", "Std. Error"]
+m_11b_pct_change <- (exp(m_11b_est) - 1) * 100
+
+#print model 11 results
+print(ct_11a)
+cat("\nTreatment effect OR:", round(m_11a_or, 3), 
+    "95% CI: [", round(m_11a_or_lo, 3), ", ", round(m_11a_or_hi, 3), "]\n")
+
+#11b: judgment amount
+cat("\n\nModel 11b: Amount of Monetary Judgment (log scale)\n")
+print(ct_11b)
+
+#calculate average (control) judgment and % change
+data_for_analysis %>%
+  filter(monetary_judgment > 0 & household_treated_by_this_hearing == FALSE) %>%
+  summarise(mean_judgment = mean(monetary_judgment, na.rm = TRUE))
+print(m_11b_pct_change)
+
+#histogram with facets
+data_for_analysis %>%
+  filter(monetary_judgment > 0) %>%
+  mutate(treatment = if_else(household_treated_by_this_hearing, "Treatment", "Control")) %>%
+  ggplot(aes(x = monetary_judgment / 1000, fill = treatment)) +
+  geom_histogram(bins = 20, alpha = 0.7) +
+  facet_wrap(~treatment) +
+  labs(x = "Monetary Judgment Amount ($1000s)", y = "Count",
+       title = "Distribution of Monetary Judgments by Treatment Status") +
+  scale_fill_manual(values = c("Treatment" = "steelblue", "Control" = "lightcoral")) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0, margin = margin(b = 10)),
+        legend.position = "none")
+
+#density plot
+data_for_analysis %>%
+  filter(monetary_judgment > 0) %>%
+  mutate(treatment = if_else(household_treated_by_this_hearing, "Treatment", "Control")) %>%
+  ggplot(aes(x = monetary_judgment, fill = treatment)) +
+  geom_density(alpha = 0.6) +
+  labs(x = "Monetary Judgment ($)", y = "Density",
+       title = "Distribution of Monetary Judgments by Treatment Status",
+       fill = "Group") +
+  scale_fill_manual(values = c("Treatment" = "steelblue", "Control" = "lightcoral")) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0, margin = margin(b = 10)))
