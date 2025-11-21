@@ -7,7 +7,7 @@ library(readxl)
 library(sandwich)
 library(lmtest)
 
-#read in data
+#read in data (crystal, you will have to adapt this)
 data_for_analysis <- read_xlsx("data/final_data_for_analysis.xlsx")
 
 #mutate binary variables to logical
@@ -18,7 +18,7 @@ data_for_analysis <- data_for_analysis %>%
                   old_vacated, court_displacement),
                 ~as.logical(.)))
 
-#create final outcome variables
+#create final outcome variables (exclude cases where outcomes were reversed)
 data_for_analysis <- data_for_analysis %>%
   mutate(
     writ_final = writ == TRUE & writ_vacated == FALSE,
@@ -79,10 +79,22 @@ multi_case_households <- data_for_analysis %>%
 multi_case_households
 
 ###begin analysis ###
-
-#quick balancing test for all hearings
-with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, flag_tacoma)))
+#quick balancing tests
+#balance test: chi-square tests for categorical variables
 with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, appearance_before_hearing)))
+with(data_for_analysis, chisq.test(table(household_treated_by_this_hearing, flag_tacoma)))
+
+#create balance table
+balance_table <- data_for_analysis %>%
+  group_by(household_treated_by_this_hearing) %>%
+  summarise(
+    n = n(),
+    appearance_pct = sum(appearance_before_hearing == TRUE, na.rm = TRUE) / n() * 100,
+    tacoma_pct = sum(flag_tacoma == TRUE, na.rm = TRUE) / n() * 100,
+    .groups = "drop"
+  )
+
+print(balance_table)
 
 ###models 1-3: treatment effects on hearing outcomes
 #model 1: effect of any household-level treatment on hearing_held
@@ -365,13 +377,11 @@ m_11b_est <- ct_11b["household_treated_by_this_hearingTRUE", "Estimate"]
 m_11b_se <- ct_11b["household_treated_by_this_hearingTRUE", "Std. Error"]
 m_11b_pct_change <- (exp(m_11b_est) - 1) * 100
 
-#print model 11 results
+#print model 11 results and CI bounds
 print(ct_11a)
-cat("\nTreatment effect OR:", round(m_11a_or, 3), 
-    "95% CI: [", round(m_11a_or_lo, 3), ", ", round(m_11a_or_hi, 3), "]\n")
+round(m_11a_or, 3)
+round(m_11a_or_hi, 3)
 
-#11b: judgment amount
-cat("\n\nModel 11b: Amount of Monetary Judgment (log scale)\n")
 print(ct_11b)
 
 #calculate average (control) judgment and % change
