@@ -7,7 +7,7 @@ library(readxl)
 library(sandwich)
 library(lmtest)
 
-#read in data (crystal, you will have to adapt this)
+#read in data
 data_for_analysis <- read_xlsx("data/final_data_for_analysis.xlsx")
 
 #mutate binary variables to logical
@@ -349,12 +349,12 @@ print(case_outcomes_table, width = 100)
 #model 11: effect on amount of monetary judgment
 
 #11a: logistic regression on whether judgment was issued
-m_11a <- glm(judgment_issued ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
+m_11a <- glm(monetary_judgment_issued ~ household_treated_by_this_hearing + appearance_before_hearing + flag_tacoma,
                data = data_for_analysis,
                family = binomial())
 
 V_11a <- vcovCL(m_11a, cluster = data_for_analysis$household_ID, type = "HC1")
-ct_11a <- coeftest(m_11a, vcov. = V_part1)
+ct_11a <- coeftest(m_11a, vcov. = V_11a)
 
 m_11a_est <- ct_11a["household_treated_by_this_hearingTRUE", "Estimate"]
 m_11a_se <- ct_11a["household_treated_by_this_hearingTRUE", "Std. Error"]
