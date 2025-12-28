@@ -150,9 +150,9 @@ m3_or_hi <- exp(m3_est + 1.96 * m3_se)
 #combine results for plotting (m1 and m2 only)
 results <- bind_rows(
   tibble(outcome = "Hearing held", or = m1_or, or_lo = m1_or_lo, or_hi = m1_or_hi),
-  tibble(outcome = "Attendance", or = m2_or, or_lo = m2_or_lo, or_hi = m2_or_hi)
+  tibble(outcome = "Tenant attended hearing", or = m2_or, or_lo = m2_or_lo, or_hi = m2_or_hi)
 ) %>%
-  mutate(outcome = factor(outcome, levels = c("Attendance", "Hearing held")))
+  mutate(outcome = factor(outcome, levels = c("Tenant attended hearing", "Hearing held")))
 
 #plot treatment effects
 ggplot(results, aes(x = or, y = outcome)) +
